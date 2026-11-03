@@ -21,35 +21,35 @@ import (
 )
 
 type Playlist struct {
-	Id             int     `json:"id"`
+	ID             int     `json:"id"`
 	Title          string  `json:"title"`
 	Description    string  `json:"description"`
 	Duration       int     `json:"duration"`
 	Public         bool    `json:"public"`
-	Is_loved_track bool    `json:"is_loved_track"`
+	IsLovedTrack bool    `json:"is_loved_track"`
 	Collaborative  bool    `json:"collaborative"`
-	Nb_tracks      int     `json:"nb_tracks"`
+	NbTracks      int     `json:"nb_tracks"`
 	Fans           int     `json:"fans"`
 	Link           string  `json:"link"`
 	Share          string  `json:"share"`
 	Picture        string  `json:"picture"`
-	Picture_small  string  `json:"picture_small"`
-	Picture_medium string  `json:"picture_medium"`
-	Picture_big    string  `json:"picture_big"`
-	Picture_xl     string  `json:"picture_xl"`
+	PictureSmall  string  `json:"picture_small"`
+	PictureMedium string  `json:"picture_medium"`
+	PictureBig    string  `json:"picture_big"`
+	PictureXL     string  `json:"picture_xl"`
 	Checksum       string  `json:"checksum"`
 	Tracklist      string  `json:"tracklist"`
-	Creation_date  string  `json:"creation_date"`
-	Add_date       string  `json:"add_date"`
-	Mod_date       string  `json:"mod_date"`
-	Md5_image      string  `json:"md5_image"`
-	Picture_type   string  `json:"picture_type"`
+	CreationDate  string  `json:"creation_date"`
+	AddDate       string  `json:"add_date"`
+	ModDate       string  `json:"mod_date"`
+	MD5Image      string  `json:"md5_image"`
+	PictureType   string  `json:"picture_type"`
 	Creator        Creator `json:"creator"`
 	Tracks         Tracks  `json:"tracks"`
 }
-	
+
 type Creator struct {
-	Id        int    `json:"id"`
+	ID        int    `json:"id"`
 	Name      string `json:"name"`
 	Tracklist string `json:"tracklist"`
 	Type      string `json:"type"`
@@ -61,24 +61,24 @@ type Tracks struct {
 }
 
 type PlaylistData struct {
-	Id                      int			`json:"id"`
-	Readable                bool   		`json:"readable"`
-	Title                   string 		`json:"title"`
-	Title_short             string 		`json:"title_short"`
-	Title_version           string 		`json:"title_version"`
-	Isrc                    string 		`json:"isrc"`
-	Link                    string 		`json:"link"`
-	Duration                int    		`json:"duration"`
-	Rank                    int    		`json:"rank"`
-	Explicit_lyrics         bool   		`json:"explicit_lyrics"`
-	Explicit_content_lyrics int    		`json:"explicit_content_lyrics"`
-	Explicit_content_cover  int    		`json:"explicit_content_cover"`
-	Preview                 string 		`json:"preview"`
-	Md5_image               string 		`json:"md5_image"`
-	Time_add                int			`json:"time_add"`
+	ID                      int    `json:"id"`
+	Readable                bool   `json:"readable"`
+	Title                   string `json:"title"`
+	TitleShort             string `json:"title_short"`
+	TitleVersion           string `json:"title_version"`
+	ISRC                    string `json:"isrc"`
+	Link                    string `json:"link"`
+	Duration                int    `json:"duration"`
+	Rank                    int    `json:"rank"`
+	ExplicitLyrics         bool   `json:"explicit_lyrics"`
+	ExplicitContentLyrics int    `json:"explicit_content_lyrics"`
+	ExplicitContentCover  int    `json:"explicit_content_cover"`
+	Preview                 string `json:"preview"`
+	MD5Image               string `json:"md5_image"`
+	TimeAdd                int    `json:"time_add"`
 
 	Artist struct {
-		Id        int    `json:"id"`
+		ID        int    `json:"id"`
 		Name      string `json:"name"`
 		Link      string `json:"link"`
 		Tracklist string `json:"tracklist"`
@@ -102,68 +102,68 @@ type Albums struct {
 }
 
 type Album struct {
-	Id				int    	`json:"id"`
-	Title			string 	`json:"title"`
-	Link			string	`json:"link"`
-	Upc				string 	`json:"upc"`
-	Cover			string 	`json:"cover"`
-	Cover_small		string 	`json:"cover_small"`
-	Cover_medium	string 	`json:"cover_medium"`
-	Cover_big		string 	`json:"cover_big"`
-	Cover_xl		string 	`json:"cover_xl"`
-	Md5_image		string 	`json:"md5_image"`
-	Genres	struct {
-		Data	[]GenreData	`json:"data"`
-	}`json:"genres"`
-	Label			string	`json:"label"`
-	Tracklist    	string 	`json:"tracklist"`
-	Type         	string 	`json:"type"`
-	Artist       	Artist 	`json:"artist"`
+	ID           int    `json:"id"`
+	Title        string `json:"title"`
+	Link         string `json:"link"`
+	Upc          string `json:"upc"`
+	Cover        string `json:"cover"`
+	CoverSmall  string `json:"cover_small"`
+	CoverMedium string `json:"cover_medium"`
+	CoverBig    string `json:"cover_big"`
+	CoverXL     string `json:"cover_xl"`
+	MD5Image    string `json:"md5_image"`
+	Genres       struct {
+		Data []GenreData `json:"data"`
+	} `json:"genres"`
+	Label     string `json:"label"`
+	Tracklist string `json:"tracklist"`
+	Type      string `json:"type"`
+	Artist    Artist `json:"artist"`
 }
 
-type GenreData	struct {
-		Name	string	`json:"name"`
-	}
+type GenreData struct {
+	Name string `json:"name"`
+}
 type Artist struct {
-	Id             	int    	`json:"id"`
-	Name           	string 	`json:"name"`
-	Link			string	`json:"link"` // new parameters
-	Share			string	`json:"share"` // new parameters
-	Picture			string 	`json:"picture"`
-	Picture_small	string 	`json:"picture_small"`
-	Picture_medium	string 	`json:"picture_medium"`
-	Picture_big		string 	`json:"picture_big"`
-	Picture_xl		string 	`json:"picture_xl"`
-	Radio			bool	`json:"radio"` // new parameters
-	Tracklist		string 	`json:"tracklist"`
-	Type			string 	`json:"type"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	Link           string `json:"link"`  // new parameters
+	Share          string `json:"share"` // new parameters
+	Picture        string `json:"picture"`
+	PictureSmall  string `json:"picture_small"`
+	PictureMedium string `json:"picture_medium"`
+	PictureBig    string `json:"picture_big"`
+	PictureXL     string `json:"picture_xl"`
+	Radio          bool   `json:"radio"` // new parameters
+	Tracklist      string `json:"tracklist"`
+	Type           string `json:"type"`
 }
 type FavoriteTracks struct {
-	Id                      int    		`json:"id"`
-	Readable                bool   		`json:"readable"`
-	Title                   string 		`json:"title"`
-	Link                    string 		`json:"link"`
-	Duration                int    		`json:"duration"`
-	Rank                    int    		`json:"rank"`
-	Explicit_lyrics         bool   		`json:"explicit_lyrics"`
-	Explicit_content_lyrics int    		`json:"explicit_content_lyrics"`
-	Explicit_content_cover  int    		`json:"explicit_content_cover"`
-	Md5_image               string 		`json:"md5_image"`
-	Time_add                time.Time	`json:"time_add"`
-	Album                   Album  		`json:"album"`
-	Artist                  Artist 		`json:"artist"`
-	Type                    string 		`json:"type"`
+	ID                      int       `json:"id"`
+	Readable                bool      `json:"readable"`
+	Title                   string    `json:"title"`
+	Link                    string    `json:"link"`
+	Duration                int       `json:"duration"`
+	Rank                    int       `json:"rank"`
+	ExplicitLyrics         bool      `json:"explicit_lyrics"`
+	ExplicitContentLyrics int       `json:"explicit_content_lyrics"`
+	ExplicitContentCover  int       `json:"explicit_content_cover"`
+	MD5Image               string    `json:"md5_image"`
+	TimeAdd                string	  `json:"time_add"`
+	Album                   Album     `json:"album"`
+	Artist                  Artist    `json:"artist"`
+	Type                    string    `json:"type"`
 }
 
 type User struct {
-	Id             int    `json:"id"`
+	ID             int    `json:"id"`
 	Name           string `json:"name"`
 	Link           string `json:"link"`
 	Picture        string `json:"picture"`
-	Picture_small  string `json:"picture_small"`
-	Picture_medium string `json:"picture_medium"`
-	Picture_big    string `json:"picture_big"`
-	Picture_xl     string `json:"picture_xl"`
+	PictureSmall  string `json:"picture_small"`
+	PictureMedium string `json:"picture_medium"`
+	PictureBig    string `json:"picture_big"`
+	PictureXL     string `json:"picture_xl"`
 	Country        string `json:"country"`
 	Tracklist      string `json:"tracklist"`
 	Type           string `json:"type"`
@@ -178,71 +178,71 @@ type DeezerError struct {
 }
 
 type Track struct {
-	Id						int				`json:"id"`
-	Readable				bool			`json:"readable"`
-	Title					string			`json:"title"`
-	Title_short				string			`json:"title_short"`
-	Title_version			string			`json:"title_version"`
-	Isrc					string			`json:"isrc"`
-	Link					string			`json:"link"`
-	Share					string			`json:"share"`
-	Duration				int				`json:"duration"`
-	Track_position			int				`json:"track_position"`
-	Disk_number				int				`json:"disk_number"`
-	Rank					int				`json:"rank"`
-	Release_date			string			`json:"release_date"`
-	Explicit_lyrics			bool			`json:"explicit_lyrics"`
-	Explicit_content_lyrics	int				`json:"explicit_content_lyrics"`
-	Explicit_content_cover	int				`json:"explicit_content_cover"`
-	Preview					string			`json:"preview"`
-	Bpm						int				`json:"int"`
-	Gain					float64			`json:"gain"`
-	AvailableCountries		[]string		`json:"available_countries"`
-	Contributors			[]Contributors	`json:"contributors"`
-	Md5Image				string			`json:"md5_image"`
-	TrackToken				string			`json:"track_token"`
-	Artist					Artist			`json:"artist"`
-	Album					Album			`json:"album"`
-
+	ID                      int            `json:"id"`
+	Readable                bool           `json:"readable"`
+	Title                   string         `json:"title"`
+	TitleShort             string         `json:"title_short"`
+	TitleVersion           string         `json:"title_version"`
+	ISRC                    string         `json:"isrc"`
+	Link                    string         `json:"link"`
+	Share                   string         `json:"share"`
+	Duration                int            `json:"duration"`
+	TrackPosition          int            `json:"track_position"`
+	DiskNumber             int            `json:"disk_number"`
+	Rank                    int            `json:"rank"`
+	ReleaseDate            string         `json:"release_date"`
+	ExplicitLyrics         bool           `json:"explicit_lyrics"`
+	ExplicitContentLyrics 	int            `json:"explicit_content_lyrics"`
+	ExplicitContentCover  int            `json:"explicit_content_cover"`
+	Preview                 string         `json:"preview"`
+	BPM                     float64        `json:"bpm"`
+	Gain                    float64        `json:"gain"`
+	AvailableCountries      []string       `json:"available_countries"`
+	Contributors            []Contributors `json:"contributors"`
+	MD5Image                string         `json:"md5_image"`
+	TrackToken              string         `json:"trackToken"`
+	Artist                  Artist         `json:"artist"`
+	Album                   Album          `json:"album"`
 }
 
 type Contributors struct {
-	Id				int		`json:"id"`
-	Name			string	`json:"name"`
-	Link			string	`json:"link"`
-	Share			string	`json:"share"`
-	Picture			string	`json:"picture"`
-	Picture_small	string	`json:"picture_small"`
-	Picture_medium	string	`json:"picture_medium"`
-	Picture_big		string	`json:"picture_big"`
-	Picture_xl		string	`json:"picture_xl"`
-	Radio			bool	`json:"radio"`
-	Tracklist		string	`json:"tracklist"`
-	Type			string	`json:"type"`
-	Role			string	`json:"role"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	Link           string `json:"link"`
+	Share          string `json:"share"`
+	Picture        string `json:"picture"`
+	PictureSmall  string `json:"picture_small"`
+	PictureMedium string `json:"picture_medium"`
+	PictureBig    string `json:"picture_big"`
+	PictureXL     string `json:"picture_xl"`
+	Radio          bool   `json:"radio"`
+	Tracklist      string `json:"tracklist"`
+	Type           string `json:"type"`
+	Role           string `json:"role"`
 }
 
 type GatewayResponse struct {
 	DeezerError []DeezerError `json:"error"`
-	Results	struct {
-		User	struct {
-			Options	struct {
-				LicenseToken	string	`json:"license_token"`
-			}	
-		}	
-	}		
+	Results     struct {
+		User struct {
+			Options struct {
+				LicenseToken string `json:"licenseToken"`
+			}
+		}
+	}
 }
 
 var client *http.Client
 
-func init_client() {
+
+func initClient() {
 	jar, _ := cookiejar.New(nil)
 	client = &http.Client{
 		Jar: jar,
 	}
 }
 
-func get_json(url string, v any) error {
+func getJSON(url string, v any) error {
 	response, err := http.Get(url)
 
 	if err != nil {
@@ -252,6 +252,8 @@ func get_json(url string, v any) error {
 		return fmt.Errorf("get %s: unexpected status %s", url, response.Status)
 	}
 
+	defer response.Body.Close()
+
 	err = json.NewDecoder(response.Body).Decode(v)
 	if err != nil {
 		return fmt.Errorf("decode %s: %w", url, err)
@@ -259,10 +261,10 @@ func get_json(url string, v any) error {
 	return nil
 }
 
-func fetch_playlist(id int) (FetchedDataPlaylist, error) {
+func fetchPlaylist(id int) (FetchedDataPlaylist, error) {
 	url := fmt.Sprintf("https://api.deezer.com/playlist/%d", id)
 	var result Playlist
-	err := get_json(url, &result)
+	err := getJSON(url, &result)
 	if err != nil {
 		return FetchedDataPlaylist{}, err
 	}
@@ -277,34 +279,34 @@ func fetch_playlist(id int) (FetchedDataPlaylist, error) {
 	return data, nil
 }
 
-func create_playlist_file(data FetchedDataPlaylist) error {
+func createPlaylistFile(data FetchedDataPlaylist) error {
 	re := regexp.MustCompile(`\s`)
-	file_name := strings.ToLower(re.ReplaceAllString(data.PlaylistName, "_"))
-	file_name = strings.ReplaceAll(file_name, "/", "_")
+	fileName := strings.ToLower(re.ReplaceAllString(data.PlaylistName, "_"))
+	fileName = strings.ReplaceAll(fileName, "/", "_")
 
-	music_list_file, err := os.Create(file_name + ".txt")
+	musicListFile, err := os.Create(fileName + ".m3u")
 	if err != nil {
 		return err
 	}
 
-	music_list := data.Tracks
-	for _, track := range music_list {
-		music_list_file.WriteString(track + "\n")
+	musicList := data.Tracks
+	for _, track := range musicList {
+		musicListFile.WriteString(track + "\n")
 	}
 
-	fmt.Printf("Tracklist has been written in %s.txt", file_name)
+	fmt.Printf("Tracklist has been written in %s.txt", fileName)
 	return nil
 }
 
-func fetch_albums(uid int) ([]string, error) {
+func fetchAlbums(uid int) ([]string, error) {
 	url := fmt.Sprintf("https://api.deezer.com/user/%d/albums", uid)
 
 	var result Albums
-	get_json(url, &result)
+	getJSON(url, &result)
 	var albums []string
 	for url != "" {
 		var result Albums
-		err := get_json(url, &result)
+		err := getJSON(url, &result)
 		if err != nil {
 			return []string{}, err
 		}
@@ -318,22 +320,22 @@ func fetch_albums(uid int) ([]string, error) {
 	return albums, nil
 }
 
-func get_username(uid int) (string, error) {
+func getUsername(uid int) (string, error) {
 	url := fmt.Sprintf("https://api.deezer.com/user/%d", uid)
 	var result User
-	err := get_json(url, &result)
+	err := getJSON(url, &result)
 	if err != nil {
 		return "", err
 	}
 	return result.Name, nil
 }
 
-func create_albums_file(data []string) {}
+func createAlbumFile(data []string) {}
 
-func fetch_favorite_tracks(uid int) ([]string, error) {
+func fetchFavoriteTracks(uid int) ([]string, error) {
 	url := fmt.Sprintf("https://api.deezer.com/user/%d/tracks", uid)
 	var result Albums
-	err := get_json(url, &result)
+	err := getJSON(url, &result)
 	if err != nil {
 		return []string{}, err
 	}
@@ -341,93 +343,99 @@ func fetch_favorite_tracks(uid int) ([]string, error) {
 	var tracks []string
 	for url != "" {
 		var result Albums
-		err := get_json(url, &result)
+		err := getJSON(url, &result)
 		if err != nil {
 			return []string{}, err
 		}
 
 		url = result.Next
-		for _, track := range result.Data {
-			tracks = append(tracks, fmt.Sprintf("%s - %s", track.Artist.Name, track.Title))
+		for _, albumTrack := range result.Data {
+			track, err := getTrackInfo(fmt.Sprintf("%d", albumTrack.ID))
+			if err != nil {
+				return []string{}, err
+			}
+
+			trackName := formatTrackName(track)
+			tracks = append(tracks, trackName)
 		}
 	}
 	return tracks, nil
 }
 
-func calc_bf_key(track_id string) []byte {
+func calcBlowfishKey(trackID string) []byte {
 	secret := []byte("g4el58wc0zvf9na1")
-	hash :=	md5.Sum([]byte(track_id))
-	hash_hex := hex.EncodeToString(hash[:])
+	hash := md5.Sum([]byte(trackID))
+	hashHex := hex.EncodeToString(hash[:])
 
 	key := make([]byte, len(secret))
 	copy(key, secret)
-	
+
 	for i := range len(hash) {
-		key[i] = key[i] ^ hash_hex[i] ^ hash_hex[i + 16]
+		key[i] = key[i] ^ hashHex[i] ^ hashHex[i+16]
 	}
 
 	return key
 }
 
-func decrypt_chunk(data []byte, key []byte) ([]byte, error) {
-	bf_iv := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
+func decryptChunk(data []byte, key []byte) ([]byte, error) {
+	blowfishIV := []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
 
 	bf, err := blowfish.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
 	decrypted := make([]byte, len(data))
-	
-	cipher.NewCBCDecrypter(bf, bf_iv).CryptBlocks(decrypted, data)
+
+	cipher.NewCBCDecrypter(bf, blowfishIV).CryptBlocks(decrypted, data)
 	return decrypted, nil
 }
 
-func decrypt_file(enc io.Reader, key []byte, dec io.Writer) error {  
-    const blockSize = 2048
+func decryptFile(enc io.Reader, key []byte, dec io.Writer) error {
+	const blockSize = 2048
 
-    buf := make([]byte, blockSize)
-    for i := 0; ; i++ {
-        n, err := io.ReadFull(enc, buf)
-        if err == io.EOF {
-            break
-        }
+	buf := make([]byte, blockSize)
+	for i := 0; ; i++ {
+		n, err := io.ReadFull(enc, buf)
+		if err == io.EOF {
+			break
+		}
 
-        if err != nil && err != io.ErrUnexpectedEOF {
-            return err
-        }
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return err
+		}
 
-        data := buf[:n]
-        isEncrypted := i % 3 == 0
-        isWholeBlock := n == blockSize
-  
-        if isEncrypted && isWholeBlock {
-			data, err  = decrypt_chunk(data, key)
+		data := buf[:n]
+		isEncrypted := i%3 == 0
+		isWholeBlock := n == blockSize
+
+		if isEncrypted && isWholeBlock {
+			data, err = decryptChunk(data, key)
 			if err != nil {
 				return err
 			}
-        }
+		}
 
-        if _, werr := dec.Write(data); werr != nil {  
-            return werr
-        } 
+		if _, werr := dec.Write(data); werr != nil {
+			return werr
+		}
 
-        if err == io.ErrUnexpectedEOF {  
-            break  
-        }
+		if err == io.ErrUnexpectedEOF {
+			break
+		}
 
-    }  
-    return nil
+	}
+	return nil
 }
 
-func get_license_token(arl string) (string, error) {
-	ajax_url := "https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token="
-	req, err := http.NewRequest("GET", ajax_url, http.NoBody)
+func getLicenseToken(arl string) (string, error) {
+	ajaxURL := "https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token="
+	req, err := http.NewRequest("GET", ajaxURL, http.NoBody)
 
 	if err != nil {
 		return "", err
 	}
 
-	req.Header.Set("Cookie", "arl=" + arl)
+	req.Header.Set("Cookie", "arl="+arl)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -441,23 +449,23 @@ func get_license_token(arl string) (string, error) {
 		return "", err
 	}
 
-	license_token := result.Results.User.Options.LicenseToken
-	return license_token, nil
+	licenseToken := result.Results.User.Options.LicenseToken
+	return licenseToken, nil
 }
 
-func get_track_token(arl string, track_id string) (string, error) {
-	api_endpoint := fmt.Sprintf("https://api.deezer.com/track/%s", track_id)
-	req, err := http.NewRequest("GET", api_endpoint, http.NoBody)
+func getTrackToken(arl string, trackID string) (string, error) {
+	apiEndpoint := fmt.Sprintf("https://api.deezer.com/track/%s", trackID)
+	req, err := http.NewRequest("GET", apiEndpoint, http.NoBody)
 	if err != nil {
 		return "", nil
 	}
 
-	req.Header.Set("Cookie", "arl=" + arl + "; comeback=1")
-	resp, err := client.Do(req)	
+	req.Header.Set("Cookie", "arl="+arl+"; comeback=1")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", nil
 	}
-	
+
 	defer resp.Body.Close()
 
 	var result Track
@@ -465,30 +473,29 @@ func get_track_token(arl string, track_id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
-	track_token := result.TrackToken
-	return track_token, nil
+
+	trackToken := result.TrackToken
+	return trackToken, nil
 }
 
-func create_media_payload (license_token, track_token string) ([]byte, error) {
+func createMediaPayload(licenseToken, trackToken string) ([]byte, error) {
 	type formats struct {
-		Cipher string	`json:"cipher"`
-		Format string	`json:"format"`
+		Cipher string `json:"cipher"`
+		Format string `json:"format"`
 	}
 	type media struct {
-		Type	string		`json:"type"`
-		Formats	[]formats	`json:"formats"`
+		Type    string    `json:"type"`
+		Formats []formats `json:"formats"`
 	}
 
 	type payload struct {
-	LicenseToken	string `json:"license_token"`
-	Media	[]media			`json:"media"`
-	TrackTokens []string	`json:"track_tokens"`
+		LicenseToken string   `json:"licenseToken"`
+		Media        []media  `json:"media"`
+		TrackTokens  []string `json:"trackTokens"`
 	}
 
-
-	pl := payload {
-		LicenseToken: license_token,
+	pl := payload{
+		LicenseToken: licenseToken,
 		Media: []media{
 			{
 				Type: "FULL",
@@ -497,7 +504,7 @@ func create_media_payload (license_token, track_token string) ([]byte, error) {
 				},
 			},
 		},
-		TrackTokens: []string{track_token},
+		TrackTokens: []string{trackToken},
 	}
 	result, err := json.Marshal(pl)
 	if err != nil {
@@ -506,45 +513,45 @@ func create_media_payload (license_token, track_token string) ([]byte, error) {
 	return result, nil
 }
 
-func get_track_url(license_token, track_token string) (string, error) {
+func getTrackURL(licenseToken, trackToken string) (string, error) {
 	type media struct {
-		MediaType	string	`json:"media_type"`
-		Cipher	struct {
-			Type	string	`json:"type"`
-		}	`json:"cipher"`
-		Format		string	`json:"format"`
-		Sources	 []struct {
-			Url	string	`json:"url"`
-		}	`json:"sources"`
+		MediaType string `json:"media_type"`
+		Cipher    struct {
+			Type string `json:"type"`
+		} `json:"cipher"`
+		Format  string `json:"format"`
+		Sources []struct {
+			URL string `json:"url"`
+		} `json:"sources"`
 	}
 
-	type	data	struct {
-		Media	[]media		`json:"media"`
+	type data struct {
+		Media []media `json:"media"`
 	}
 
-	type getUrlResponse struct {
-		Data	[]data		`json:"data"`
+	type getURLResponse struct {
+		Data []data `json:"data"`
 	}
 
-	get_url_endpoint := "https://media.deezer.com/v1/get_url"
-	payload, err := create_media_payload(license_token, track_token)
+	getURLEndpoint := "https://media.deezer.com/v1/get_url"
+	payload, err := createMediaPayload(licenseToken, trackToken)
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", get_url_endpoint, bytes.NewBuffer(payload))
+	req, err := http.NewRequest("POST", getURLEndpoint, bytes.NewBuffer(payload))
 	if err != nil {
 		return "", err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
-		if err != nil {
-			return "", err
-		}
+	if err != nil {
+		return "", err
+	}
 
 	defer resp.Body.Close()
-	var result getUrlResponse
+	var result getURLResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
 
 	if len(result.Data) == 0 {
@@ -555,61 +562,78 @@ func get_track_url(license_token, track_token string) (string, error) {
 		if len(dataItem.Media) == 0 {
 			continue
 		}
-	for _, mediaItem := range dataItem.Media {
-		if len(mediaItem.Sources) == 0 {
-			continue
-		}
-	for _, source := range mediaItem.Sources {
-		if len(source.Url) == 0 {
-			continue
-		}
-		url := source.Url
-		return url, nil
+		for _, mediaItem := range dataItem.Media {
+			if len(mediaItem.Sources) == 0 {
+				continue
 			}
-		}	
+			for _, source := range mediaItem.Sources {
+				if len(source.URL) == 0 {
+					continue
+				}
+				url := source.URL
+				return url, nil
+			}
+		}
 	}
 	return "", err
 }
 
-func download_track(url string, track_info Track) (string, error) {
+func formatTrackName(trackInfo Track) string {
+	var artists_builder strings.Builder
+
+	for i, contributor := range trackInfo.Contributors {
+		artists_builder.WriteString(contributor.Name)
+		if i < len(trackInfo.Contributors)-1 {
+			artists_builder.WriteString(", ")
+		}
+	}
+
+	artists := artists_builder.String()
+
+	fileName := fmt.Sprintf("%s - %s", artists, trackInfo.Title)
+	fileName = strings.ReplaceAll(fileName, "/", "_")
+	return fileName
+}
+
+func downloadTrack(url string, trackInfo Track) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	file_name := fmt.Sprintf("%s - %s.mp3", track_info.Artist.Name, track_info.Title)
-	file_name = strings.ReplaceAll(file_name, "/", "_")
 	var enc bytes.Buffer
 
+	fileName := formatTrackName(trackInfo) + ".mp3"
+
 	_, err = io.Copy(&enc, resp.Body)
-	
-	track_id := fmt.Sprintf("%d", track_info.Id)
-	key := calc_bf_key(track_id)
-	if err != nil {
-		return "", err
-	}
-	
-	dec, err := os.Create(file_name)
+
+	trackID := fmt.Sprintf("%d", trackInfo.ID)
+	key := calcBlowfishKey(trackID)
 	if err != nil {
 		return "", err
 	}
 
-	decrypt_file(&enc, key, dec)
+	dec, err := os.Create(fileName)
+	if err != nil {
+		return "", err
+	}
 
-	return file_name, nil
+	decryptFile(&enc, key, dec)
+
+	return fileName, nil
 }
 
-func add_metadata(file_name string, track_info Track) error {
+func addMetadata(fileName string, trackInfo Track) error {
 	var artists []string
-	for _, contributor := range track_info.Contributors{
+	for _, contributor := range trackInfo.Contributors {
 		artists = append(artists, contributor.Name)
 	}
 
-	album_url := fmt.Sprintf("https://api.deezer.com/album/%d", track_info.Album.Id)
+	album_url := fmt.Sprintf("https://api.deezer.com/album/%d", trackInfo.Album.ID)
 	var album_info Album
-	
-	err := get_json(album_url, &album_info)
+
+	err := getJSON(album_url, &album_info)
 	if err != nil {
 		return err
 	}
@@ -620,22 +644,26 @@ func add_metadata(file_name string, track_info Track) error {
 	}
 
 	const date_format = "2006-01-02"
-	release_date, err := time.Parse(date_format, track_info.Release_date)
-	err = taglib.WriteTags(file_name, map[string][]string{
-		taglib.Artist:			artists,
-		taglib.Title:			{track_info.Title},
-		taglib.Album:			{track_info.Album.Title},
-		taglib.AlbumArtist:		{track_info.Album.Artist.Name},
-		taglib.TrackNumber:		{fmt.Sprintf("%d", track_info.Track_position)},
-		taglib.ISRC:			{track_info.Isrc},
-		taglib.BPM:				{fmt.Sprintf("%d", track_info.Bpm)},
-		taglib.Genre:			{genre},
-		taglib.Label:			{album_info.Label},
-		"Year":					{fmt.Sprintf("%d", release_date.Year())},
-		"Gain":					{fmt.Sprintf("%f", track_info.Gain)},
-		}, 0)
+	release_date, err := time.Parse(date_format, trackInfo.ReleaseDate)
+	if err != nil {
+		return err
+	}
 
-	cover_url := track_info.Album.Cover_big
+	err = taglib.WriteTags(fileName, map[string][]string{
+		taglib.Artist:      artists,
+		taglib.Title:       {trackInfo.Title},
+		taglib.Album:       {trackInfo.Album.Title},
+		taglib.AlbumArtist: {trackInfo.Album.Artist.Name},
+		taglib.TrackNumber: {fmt.Sprintf("%d", trackInfo.TrackPosition)},
+		taglib.ISRC:        {trackInfo.ISRC},
+		taglib.BPM:         {fmt.Sprintf("%f", trackInfo.BPM)},
+		taglib.Genre:       {genre},
+		taglib.Label:       {album_info.Label},
+		"Year":             {fmt.Sprintf("%d", release_date.Year())},
+		"Gain":             {fmt.Sprintf("%f", trackInfo.Gain)},
+	}, 0)
+
+	cover_url := trackInfo.Album.CoverBig
 
 	resp, err := http.Get(cover_url)
 	if err != nil {
@@ -646,11 +674,11 @@ func add_metadata(file_name string, track_info Track) error {
 
 	_, err = io.Copy(&cover, resp.Body)
 	err = taglib.WriteImageOptions(
-	file_name,
-	cover.Bytes(), 0,
-	"Front Cover",
-	"Front artwork",
-	"image/jpeg")
+		fileName,
+		cover.Bytes(), 0,
+		"Front Cover",
+		"Front artwork",
+		"image/jpeg")
 
 	if err != nil {
 		return err
@@ -659,66 +687,66 @@ func add_metadata(file_name string, track_info Track) error {
 	return nil
 }
 
-func get_track_info(track_id string) (Track, error) {
-	api_endpoint := fmt.Sprintf("https://api.deezer.com/track/%s", track_id)
+func getTrackInfo(trackID string) (Track, error) {
+	apiEndpoint := fmt.Sprintf("https://api.deezer.com/track/%s", trackID)
 	var track Track
-	err := get_json(api_endpoint, &track)
-	if err !=nil {
+	err := getJSON(apiEndpoint, &track)
+	if err != nil {
 		return Track{}, err
 	}
 
 	return track, nil
 }
 
-
 func main() {
-	init_client()
+	initClient()
 
-	//user_id := os.Getenv("deezer_uid")
-	song_id := "67929161" // track with a single artsit
-	//song_id = "67929169" // track with multiple artists
 	arl := os.Getenv("arl")
+	//user_id := os.Getenv("deezer_uid")
+	//song_id := "67929161" // track with a single artsit
+	song_id := "67929169" // track with multiple artists
 
-	lic_tk, err := get_license_token(arl)
-	if err != nil{
-		log.Fatal(err)
-	}
-	trk_tk, err := get_track_token(arl, song_id)
-	if err != nil{
-		log.Fatal(err)
-	}
-
-	trk_url, err := get_track_url(lic_tk, trk_tk)
-	if err != nil{
-		log.Fatal(err)
-	}
-
-	trk_info , err := get_track_info(song_id)
-	if err != nil{
-		log.Fatal(err)
-	}
-
-	file_name, err := download_track(trk_url, trk_info)
+	lic_tk, err := getLicenseToken(arl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = add_metadata(file_name, trk_info)
+	trk_tk, err := getTrackToken(arl, song_id)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//data, err := fetch_playlist(playlist_id)
+	trk_url, err := getTrackURL(lic_tk, trk_tk)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	trk_info, err := getTrackInfo(song_id)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fileName, err := downloadTrack(trk_url, trk_info)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = addMetadata(fileName, trk_info)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//data, err := fetchPlaylist(playlist_id)
 	//if err != nil {
 	//	log.Fatal(err)
 	//}
-	
-	////albums := fetch_albums(user_id)
+
+	////albums := fetchAlbums(user_id)
 	//for _, track := range data.Tracks {
 	//	fmt.Println(track)time
 	//}
 
-	//favorite_tracks, err := fetch_favorite_tracks(user_id)
+	//favorite_tracks, err := fetchFavoriteTracks(user_id)
 	//if err != nil {
 	//	log.Fatal(err)
 	//}

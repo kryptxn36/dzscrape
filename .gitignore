@@ -1,1 +1,4 @@
-*.{mp3,flac,wav,m3u}
+*.mp3
+*.flac
+*.wav
+*.m3u
