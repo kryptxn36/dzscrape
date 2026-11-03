@@ -190,7 +190,7 @@ type Track struct {
 	TrackPosition          int            `json:"track_position"`
 	DiskNumber             int            `json:"disk_number"`
 	Rank                    int            `json:"rank"`
-	ReleaseDate            string         `json:"release_date"`
+	ReleaseDate            string         `json:"releaseDate"`
 	ExplicitLyrics         bool           `json:"explicit_lyrics"`
 	ExplicitContentLyrics 	int            `json:"explicit_content_lyrics"`
 	ExplicitContentCover  int            `json:"explicit_content_cover"`
@@ -579,16 +579,16 @@ func getTrackURL(licenseToken, trackToken string) (string, error) {
 }
 
 func formatTrackName(trackInfo Track) string {
-	var artists_builder strings.Builder
+	var artistsBuilder strings.Builder
 
 	for i, contributor := range trackInfo.Contributors {
-		artists_builder.WriteString(contributor.Name)
+		artistsBuilder.WriteString(contributor.Name)
 		if i < len(trackInfo.Contributors)-1 {
-			artists_builder.WriteString(", ")
+			artistsBuilder.WriteString(", ")
 		}
 	}
 
-	artists := artists_builder.String()
+	artists := artistsBuilder.String()
 
 	fileName := fmt.Sprintf("%s - %s", artists, trackInfo.Title)
 	fileName = strings.ReplaceAll(fileName, "/", "_")
@@ -630,21 +630,21 @@ func addMetadata(fileName string, trackInfo Track) error {
 		artists = append(artists, contributor.Name)
 	}
 
-	album_url := fmt.Sprintf("https://api.deezer.com/album/%d", trackInfo.Album.ID)
-	var album_info Album
+	albumURL := fmt.Sprintf("https://api.deezer.com/album/%d", trackInfo.Album.ID)
+	var albumInfo Album
 
-	err := getJSON(album_url, &album_info)
+	err := getJSON(albumURL, &albumInfo)
 	if err != nil {
 		return err
 	}
 
 	var genre string
-	for _, g := range album_info.Genres.Data {
+	for _, g := range albumInfo.Genres.Data {
 		genre = g.Name
 	}
 
-	const date_format = "2006-01-02"
-	release_date, err := time.Parse(date_format, trackInfo.ReleaseDate)
+	const dateFormat = "2006-01-02"
+	releaseDate, err := time.Parse(dateFormat, trackInfo.ReleaseDate)
 	if err != nil {
 		return err
 	}
@@ -658,14 +658,14 @@ func addMetadata(fileName string, trackInfo Track) error {
 		taglib.ISRC:        {trackInfo.ISRC},
 		taglib.BPM:         {fmt.Sprintf("%f", trackInfo.BPM)},
 		taglib.Genre:       {genre},
-		taglib.Label:       {album_info.Label},
-		"Year":             {fmt.Sprintf("%d", release_date.Year())},
+		taglib.Label:       {albumInfo.Label},
+		"Year":             {fmt.Sprintf("%d", releaseDate.Year())},
 		"Gain":             {fmt.Sprintf("%f", trackInfo.Gain)},
 	}, 0)
 
-	cover_url := trackInfo.Album.CoverBig
+	coverURL := trackInfo.Album.CoverBig
 
-	resp, err := http.Get(cover_url)
+	resp, err := http.Get(coverURL)
 	if err != nil {
 		return err
 	}
@@ -702,55 +702,55 @@ func main() {
 	initClient()
 
 	arl := os.Getenv("arl")
-	//user_id := os.Getenv("deezer_uid")
-	//song_id := "67929161" // track with a single artsit
-	song_id := "67929169" // track with multiple artists
+	//userID := os.Getenv("deezer_uid")
+	//songID := "67929161" // track with a single artsit
+	songID := "67929169" // track with multiple artists
 
-	lic_tk, err := getLicenseToken(arl)
+	licenseToken, err := getLicenseToken(arl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	trk_tk, err := getTrackToken(arl, song_id)
+	trackToken, err := getTrackToken(arl, songID)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	trk_url, err := getTrackURL(lic_tk, trk_tk)
+	trackURL, err := getTrackURL(licenseToken, trackToken)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	trk_info, err := getTrackInfo(song_id)
+	trackInfo, err := getTrackInfo(songID)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fileName, err := downloadTrack(trk_url, trk_info)
+	fileName, err := downloadTrack(trackURL, trackInfo)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = addMetadata(fileName, trk_info)
+	err = addMetadata(fileName, trackInfo)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//data, err := fetchPlaylist(playlist_id)
+	//data, err := fetchPlaylist(playlistID)
 	//if err != nil {
 	//	log.Fatal(err)
 	//}
 
-	////albums := fetchAlbums(user_id)
+	////albums := fetchAlbums(userID)
 	//for _, track := range data.Tracks {
 	//	fmt.Println(track)time
 	//}
 
-	//favorite_tracks, err := fetchFavoriteTracks(user_id)
+	//favoriteTracks, err := fetchFavoriteTracks(userID)
 	//if err != nil {
 	//	log.Fatal(err)
 	//}
-	//for _, track := range favorite_tracks {
+	//for _, track := range favoriteTracks {
 	//	fmt.Println(track)
 	//}
 
