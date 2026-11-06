@@ -7,15 +7,19 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go.senan.xyz/taglib"
@@ -368,8 +372,6 @@ func (c *Client) getUsername(ctx context.Context, uid int) (string, error) {
 	return result.Name, nil
 }
 
-func createAlbumFile(data []string) {}
-
 func (c *Client) fetchFavoriteTracks(ctx context.Context, uid int) ([]string, error) {
 	url := fmt.Sprintf("https://api.deezer.com/user/%d/tracks", uid)
 	var result Albums
@@ -388,7 +390,7 @@ func (c *Client) fetchFavoriteTracks(ctx context.Context, uid int) ([]string, er
 
 		url = result.Next
 		for _, albumTrack := range result.Data {
-			track, err := c.getTrackInfo(ctx, fmt.Sprintf("%d", albumTrack.ID))
+			track, err := c.getTrackInfo(ctx, albumTrack.ID)
 			if err != nil {
 				return []string{}, err
 			}
@@ -465,9 +467,9 @@ func decryptFile(enc io.Reader, key []byte, dec io.Writer) error {
 	return nil
 }
 
-func (c *Client) getLicenseToken(arl string) (string, error) {
+func (c *Client) getLicenseToken(ctx context.Context, arl string) (string, error) {
 	ajaxURL := "https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token="
-	req, err := http.NewRequest("GET", ajaxURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ajaxURL, nil)
 
 	if err != nil {
 		return "", err
@@ -491,8 +493,8 @@ func (c *Client) getLicenseToken(arl string) (string, error) {
 	return licenseToken, nil
 }
 
-func (c *Client) getTrackToken(arl string, trackID string) (string, error) {
-	apiEndpoint := fmt.Sprintf("https://api.deezer.com/track/%s", trackID)
+func (c *Client) getTrackToken(arl string, trackID int) (string, error) {
+	apiEndpoint := fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
 	req, err := http.NewRequest("GET", apiEndpoint, http.NoBody)
 	if err != nil {
 		return "", nil
@@ -627,6 +629,18 @@ func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
 func formatTrackName(trackInfo Track) string {
 	var artistsBuilder strings.Builder
 
+	var unsafeFilenameChars = strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+
 	for i, contributor := range trackInfo.Contributors {
 		artistsBuilder.WriteString(contributor.Name)
 		if i < len(trackInfo.Contributors)-1 {
@@ -636,80 +650,105 @@ func formatTrackName(trackInfo Track) string {
 
 	artists := artistsBuilder.String()
 
-	fileName := fmt.Sprintf("%s - %s", artists, trackInfo.Title)
-	fileName = strings.ReplaceAll(fileName, "/", "_")
-	return fileName
+	filename := fmt.Sprintf("%s - %s", artists, trackInfo.Title)
+	filename = strings.TrimSpace(filename)
+	filename = unsafeFilenameChars.Replace(filename)
+	filename = strings.Trim(filename, ". ")
+	if filename == "" {
+		return "untitled"
+	}
+
+	runes := []rune(filename)
+	if len(runes) > 200 {
+		filename = string(runes[:200])
+	}
+	return filename
 }
 
-func downloadTrack(url string, trackInfo Track) (string, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+func (d *Downloader) fetchAndDecrypt(
+	ctx context.Context,
+	trackURL string, 
+	trackInfo Track, 
+	filePath io.Writer) error {
 
-	var enc bytes.Buffer
-
-	fileName := formatTrackName(trackInfo) + ".mp3"
-
-	_, err = io.Copy(&enc, resp.Body)
-
-	trackID := fmt.Sprintf("%d", trackInfo.ID)
-	key := calcBlowfishKey(trackID)
-	if err != nil {
-		return "", err
-	}
-
-	dec, err := os.Create(fileName)
-	if err != nil {
-		return "", err
-	}
-
-	decryptFile(&enc, key, dec)
-
-	return fileName, nil
-}
-
-func (c *Client) addMetadata(ctx context.Context, fileName string, trackInfo Track) error {
-	var artists []string
-	for _, contributor := range trackInfo.Contributors {
-		artists = append(artists, contributor.Name)
-	}
-
-	albumPath := fmt.Sprintf("/album/%d", trackInfo.Album.ID)
-	var albumInfo Album
-
-	err := c.getJSON(ctx, c.apiBaseURL, albumPath, &albumInfo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trackURL, nil)
 	if err != nil {
 		return err
 	}
+	resp, err := d.client.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET media: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	trackID := fmt.Sprintf("%d", trackInfo.ID)
+	key := calcBlowfishKey(trackID)
+
+	cw := &countingWriter{w: filePath}
+
+	if err := decryptFile(resp.Body, key, cw); err != nil{
+		return fmt.Errorf("Failed to decrypt: %w", err)
+	}
+
+	if resp.ContentLength >= 0 && cw.n != resp.ContentLength {
+		return fmt.Errorf("Truncated media: got %d of %d bytes", cw.n, resp.ContentLength)
+	}
+
+	return nil
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func (d *Downloader) getCover(ctx context.Context, album Album) {
+}
+
+func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) error {
+
+	artists := make([]string, 0, len(track.Contributors))
+	for _, contributor := range track.Contributors {
+		artists = append(artists, contributor.Name)
+	}
+
+	album, err := d.getAlbum(ctx, track.Album.ID)
 
 	var genre string
-	for _, g := range albumInfo.Genres.Data {
+
+	for _, g := range album.Genres.Data {
 		genre = g.Name
 	}
 
 	const dateFormat = "2006-01-02"
-	releaseDate, err := time.Parse(dateFormat, trackInfo.ReleaseDate)
+	releaseDate, err := time.Parse(dateFormat, track.ReleaseDate)
 	if err != nil {
 		return err
 	}
 
-	err = taglib.WriteTags(fileName, map[string][]string{
+	tags := map[string][]string{
 		taglib.Artist:      artists,
-		taglib.Title:       {trackInfo.Title},
-		taglib.Album:       {trackInfo.Album.Title},
-		taglib.AlbumArtist: {trackInfo.Album.Artist.Name},
-		taglib.TrackNumber: {fmt.Sprintf("%d", trackInfo.TrackPosition)},
-		taglib.ISRC:        {trackInfo.ISRC},
-		taglib.BPM:         {fmt.Sprintf("%f", trackInfo.BPM)},
+		taglib.Title:       {track.Title},
+		taglib.Album:       {track.Album.Title},
+		taglib.AlbumArtist: {track.Album.Artist.Name},
+		taglib.TrackNumber: {fmt.Sprintf("%d", track.TrackPosition)},
+		taglib.ISRC:        {track.ISRC},
+		taglib.BPM:         {fmt.Sprintf("%f", track.BPM)},
 		taglib.Genre:       {genre},
-		taglib.Label:       {albumInfo.Label},
+		taglib.Label:       {album.Label},
 		"Year":             {fmt.Sprintf("%d", releaseDate.Year())},
-		"Gain":             {fmt.Sprintf("%f", trackInfo.Gain)},
-	}, 0)
+		"Gain":             {fmt.Sprintf("%f", track.Gain)},
+	}
+	err = taglib.WriteTags(path, tags, 0)
 
-	coverURL := trackInfo.Album.CoverBig
+	coverURL := track.Album.CoverBig
 
 	resp, err := http.Get(coverURL)
 	if err != nil {
@@ -720,7 +759,7 @@ func (c *Client) addMetadata(ctx context.Context, fileName string, trackInfo Tra
 
 	_, err = io.Copy(&cover, resp.Body)
 	err = taglib.WriteImageOptions(
-		fileName,
+		path,
 		cover.Bytes(), 0,
 		"Front Cover",
 		"Front artwork",
@@ -733,8 +772,8 @@ func (c *Client) addMetadata(ctx context.Context, fileName string, trackInfo Tra
 	return nil
 }
 
-func (c *Client) getTrackInfo(ctx context.Context, trackID string) (Track, error) {
-	path := fmt.Sprintf("/track/%s", trackID)
+func (c *Client) getTrackInfo(ctx context.Context, trackID int) (Track, error) {
+	path := fmt.Sprintf("/track/%d", trackID)
 	var track Track
 	err := c.getJSON(ctx, c.apiBaseURL, path, &track)
 	if err != nil {
@@ -744,17 +783,143 @@ func (c *Client) getTrackInfo(ctx context.Context, trackID string) (Track, error
 	return track, nil
 }
 
+func (c *Client) GetAlbum(ctx context.Context, id int) (Album, error){
+	return Album{}, nil
+}
+
+func (d *Downloader) getAlbum(ctx context.Context, id int) (Album, error) {
+	d.mu.Lock()
+	if album, ok := d.albumCache[id]; ok {
+		d.mu.Unlock()
+		return album, nil
+	}
+	d.mu.Unlock()
+
+	album, err := d.client.GetAlbum(ctx, id)
+	if err != nil {
+		return Album{}, nil
+	}
+	
+	d.mu.Lock()
+	d.albumCache[id] = album
+	d.mu.Unlock()
+
+	return album, nil
+}
+
+type Downloader struct {
+	client			*Client
+	outDir			string
+	licenseToken	string
+	force			bool
+	mu				sync.Mutex
+	albumCache		map[int]Album
+}
+
+
+func (d *Downloader) downloadTrack(ctx context.Context, trackID int) (string, error) {
+	if trackID <= 0 {
+		return "", fmt.Errorf("Invalid track ID: %d", trackID)
+	}
+
+	track, err := d.client.getTrackInfo(ctx, trackID)
+	if err != nil {
+		return "", fmt.Errorf("Get track %d: %w", trackID, err)
+	}
+
+	licenseToken, err := d.client.getLicenseToken(ctx, d.client.arl)
+	d.licenseToken = licenseToken
+	trackToken, err := d.client.getTrackToken(d.client.arl, trackID)
+	if err != nil {
+		return "", fmt.Errorf("Failed to get token for track with id %d: %w", trackID, err)
+	}
+
+	trackURL, err := d.client.getTrackURL(d.licenseToken, trackToken)
+	if err != nil {
+		return "", fmt.Errorf("Failed to get URL for track with id %d: %w", trackID, err)
+	}
+
+	tmp, err := os.CreateTemp(d.outDir, ".part-*")
+	if err != nil{
+		return "", fmt.Errorf("Failed to create temp file: %w", err)
+	}
+
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := d.fetchAndDecrypt(ctx, trackURL, track, tmp); err !=nil {
+		return "", fmt.Errorf("Failed to save track with id %d: %w", trackID, err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("Close track %d: %w", trackID, err)
+	}
+
+	finalPath := filepath.Join(
+		d.outDir,
+		formatTrackName(track) + ".mp3",
+	)
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+			return "", fmt.Errorf("Rename track %d: %w", trackID, err)
+		}
+
+	if err := d.addMetadata(ctx, finalPath, track); err != nil {
+		return "", fmt.Errorf("Write metadata: %w", err)
+	}
+
+	return finalPath, nil
+}
+
+func initDownloader(ctx context.Context, c *Client, outDir string, force bool) (*Downloader, error) {
+	if err := os.Mkdir(outDir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, fmt.Errorf("Failed to create directory: %w", err)
+	}
+
+	licenseToken, err := c.getLicenseToken(ctx, c.arl)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to retrieve license token: %w", err)
+	}
+
+	if licenseToken == "" {
+			return nil, errors.New("empty license token; check ARL")
+		}
+
+	return &Downloader{
+		client: c,
+		outDir: outDir,
+		licenseToken: licenseToken,
+		force:	force,
+		albumCache:	make(map[int]Album),
+	}, nil
+
+}
+
 func main() {
 	arl := os.Getenv("arl")
 	client := initClient(arl)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	downloader, err := initDownloader(ctx, client, "downloads", false)
+
+	if err != nil{
+		log.Fatal(err)
+	}
 
 	//userID := os.Getenv("deezer_uid")
-	//songID := "67929161" // track with a single artsit
-	songID := "67929169" // track with multiple artists
+	songID := 67929161 // track with a single artsit
+	//songID := 67929169 // track with multiple artists
 	//songID :=	"-3040362302" // track that was imported locally
 
+	filePath, err := downloader.downloadTrack(ctx, songID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(filePath)
+	/*
 	licenseToken, err := client.getLicenseToken(arl)
 	if err != nil {
 		log.Fatal(err)
@@ -775,7 +940,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fileName, err := downloadTrack(trackURL, trackInfo)
+	fileName, err := downloader.downloadTrack(trackURL, trackInfo)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -784,7 +949,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	*/
 	//data, err := fetchPlaylist(playlistID)
 	//if err != nil ctx, {
 	//	log.Fatal(err)
