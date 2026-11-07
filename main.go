@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	_"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -298,22 +299,61 @@ func (c *Client) getJSON(ctx context.Context, baseURL, path string, v any) error
 	return nil
 }
 
-func (c *Client) fetchPlaylist(ctx context.Context, id int) (FetchedDataPlaylist, error) {
+func (c *Client) GetTrack(ctx context.Context, trackID int) (Track, error) {
+	path := fmt.Sprintf("/track/%d", trackID)
+	var track Track
+	err := c.getJSON(ctx, c.apiBaseURL, path, &track)
+	if err != nil {
+		return Track{}, err
+	}
+
+	return track, nil
+}
+
+func (c *Client) GetAlbum(ctx context.Context, id int) (Album, error){
+	var album Album
+	path := fmt.Sprintf("/album/%d", id)
+	if err := c.getJSON(ctx, c.apiBaseURL, path, &album); err != nil {
+		return Album{}, err
+	}
+
+	return album, nil
+}
+
+func (c *Client) GetUser(ctx context.Context, uid int) (User, error) {
+	path := fmt.Sprintf("/user/%d", uid)
+	var user User
+	if err := c.getJSON(ctx, c.apiBaseURL, path, &user); err != nil {
+		return User{}, err
+	}
+
+	return user, nil
+}
+
+func (c *Client) GetPlaylist(ctx context.Context, id int) (Playlist, error){
+	var playlist Playlist
 	path := fmt.Sprintf("/playlist/%d", id)
-	var result Playlist
-	err := c.getJSON(ctx, c.apiBaseURL, path, &result)
+	if err := c.getJSON(ctx, c.apiBaseURL, path, &playlist); err != nil {
+		return Playlist{}, err 
+	}
+
+	return playlist, nil
+}
+
+func (c *Client) fetchPlaylist(ctx context.Context, id int) (FetchedDataPlaylist, error) {
+	playlist, err := c.GetPlaylist(ctx, id)
 	if err != nil {
 		return FetchedDataPlaylist{}, err
 	}
 
 	var tracks []string
 
-	for _, track := range result.Tracks.Data {
+	for _, track := range playlist.Tracks.Data {
 		tracks = append(tracks, fmt.Sprintf("%s - %s", track.Artist.Name, track.Title))
 	}
 
 	var data FetchedDataPlaylist
-	data.PlaylistName = result.Title
+	data.PlaylistName = playlist.Title
 	data.Tracks = tracks
 	return data, nil
 }
@@ -337,67 +377,40 @@ func createPlaylistFile(data FetchedDataPlaylist) error {
 	return nil
 }
 
-func (c *Client) fetchAlbums(ctx context.Context, uid int) ([]string, error) {
-	path := fmt.Sprintf("/user/%d/albums", uid)
+type Page[T any] struct {
+	Data	[]T		`json:"data"`
+	Total	int		`json:"total"`
+	Next	string	`json:"next"`
+}
 
-	var result Albums
-	err := c.getJSON(ctx, c.apiBaseURL, path, &result)
-	if err != nil {
-		return []string{}, err
-	}
-	var albums []string
-	for path != "" {
-		var result Albums
-		err := c.getJSON(ctx, c.apiBaseURL, path, &result)
-		if err != nil {
-			return []string{}, err
+func (c *Client) fetchAlbums(ctx context.Context, uid int) ([]Album, error) {
+	var albums []Album
+	next := fmt.Sprintf("/user/%d/albums", uid)
+
+	for next != "" {
+		var page Page[Album]
+		if err := c.getJSON(ctx, c.apiBaseURL, next, &page); err != nil {
+return nil, fmt.Errorf("get user %d albums: %w", uid, err)
 		}
-
-		path = result.Next
-		for _, album := range result.Data {
-			albums = append(albums, fmt.Sprintf("%s - %s", album.Artist.Name, album.Title))
-		}
+		albums = append(albums, page.Data...)
+		next = page.Next
 	}
-
 	return albums, nil
 }
 
-func (c *Client) getUsername(ctx context.Context, uid int) (string, error) {
-	path := fmt.Sprintf("/user/%d", uid)
-	var result User
-	err := c.getJSON(ctx, c.apiBaseURL, path, &result)
-	if err != nil {
-		return "", err
-	}
-	return result.Name, nil
-}
 
-func (c *Client) fetchFavoriteTracks(ctx context.Context, uid int) ([]string, error) {
-	url := fmt.Sprintf("https://api.deezer.com/user/%d/tracks", uid)
-	var result Albums
-	err := c.getJSON(ctx, c.apiBaseURL, url, &result)
-	if err != nil {
-		return []string{}, err
-	}
+func (c *Client) fetchFavoriteTracks(ctx context.Context, uid int) ([]Track, error) {
+	var tracks []Track
+	next := fmt.Sprintf("/user/%d/tracks", uid)
 
-	var tracks []string
-	for url != "" {
-		var result Albums
-		err := c.getJSON(ctx, c.apiBaseURL, url, &result)
-		if err != nil {
-			return []string{}, err
+	for next != "" {
+		var page Page[Track]
+		if err := c.getJSON(ctx, c.apiBaseURL, next, &page); err != nil {
+			return []Track{}, err
 		}
+		tracks = append(tracks, page.Data...)
 
-		url = result.Next
-		for _, albumTrack := range result.Data {
-			track, err := c.getTrackInfo(ctx, albumTrack.ID)
-			if err != nil {
-				return []string{}, err
-			}
-
-			trackName := formatTrackName(track)
-			tracks = append(tracks, trackName)
-		}
+		next = page.Next
 	}
 	return tracks, nil
 }
@@ -468,8 +481,8 @@ func decryptFile(enc io.Reader, key []byte, dec io.Writer) error {
 }
 
 func (c *Client) getLicenseToken(ctx context.Context, arl string) (string, error) {
-	ajaxURL := "https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token="
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ajaxURL, nil)
+	path := "/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token="
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.webBaseURL + path, nil)
 
 	if err != nil {
 		return "", err
@@ -573,13 +586,12 @@ func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
 		Data []data `json:"data"`
 	}
 
-	getURLEndpoint := "https://media.deezer.com/v1/get_url"
 	payload, err := createMediaPayload(licenseToken, trackToken)
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", getURLEndpoint, bytes.NewBuffer(payload))
+	req, err := http.NewRequest("POST", joinURL(c.mediaBaseURL, "/v1/get_url"), bytes.NewBuffer(payload))
 	if err != nil {
 		return "", err
 	}
@@ -709,8 +721,7 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (d *Downloader) getCover(ctx context.Context, album Album) {
-}
+func (d *Downloader) GetCover(ctx context.Context, albumID int) {}
 
 func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) error {
 
@@ -721,10 +732,9 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 
 	album, err := d.getAlbum(ctx, track.Album.ID)
 
-	var genre string
-
-	for _, g := range album.Genres.Data {
-		genre = g.Name
+	genre := ""
+	if len(album.Genres.Data) > 0 {
+		genre = album.Genres.Data[0].Name
 	}
 
 	const dateFormat = "2006-01-02"
@@ -750,7 +760,7 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 
 	coverURL := track.Album.CoverBig
 
-	resp, err := http.Get(coverURL)
+	resp, err := d.client.http.Get(coverURL)
 	if err != nil {
 		return err
 	}
@@ -772,20 +782,6 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 	return nil
 }
 
-func (c *Client) getTrackInfo(ctx context.Context, trackID int) (Track, error) {
-	path := fmt.Sprintf("/track/%d", trackID)
-	var track Track
-	err := c.getJSON(ctx, c.apiBaseURL, path, &track)
-	if err != nil {
-		return Track{}, err
-	}
-
-	return track, nil
-}
-
-func (c *Client) GetAlbum(ctx context.Context, id int) (Album, error){
-	return Album{}, nil
-}
 
 func (d *Downloader) getAlbum(ctx context.Context, id int) (Album, error) {
 	d.mu.Lock()
@@ -817,12 +813,12 @@ type Downloader struct {
 }
 
 
-func (d *Downloader) downloadTrack(ctx context.Context, trackID int) (string, error) {
+func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, error) {
 	if trackID <= 0 {
 		return "", fmt.Errorf("Invalid track ID: %d", trackID)
 	}
 
-	track, err := d.client.getTrackInfo(ctx, trackID)
+	track, err := d.client.GetTrack(ctx, trackID)
 	if err != nil {
 		return "", fmt.Errorf("Get track %d: %w", trackID, err)
 	}
@@ -899,77 +895,18 @@ func initDownloader(ctx context.Context, c *Client, outDir string, force bool) (
 }
 
 func main() {
-	arl := os.Getenv("arl")
-	client := initClient(arl)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	downloader, err := initDownloader(ctx, client, "downloads", false)
+	//arl := os.Getenv("DEEZER_ARL")
+	//uid, _ := strconv.Atoi(os.Getenv("DEEZER_UID"))
+	//client := initClient(arl)
+	//ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	//defer stop()
+	//downloader, err := initDownloader(ctx, client, "downloads", false)
+	//if err != nil{
+	//	log.Fatal(err)
+	//}
 
-	if err != nil{
-		log.Fatal(err)
-	}
-
-	//userID := os.Getenv("deezer_uid")
-	songID := 67929161 // track with a single artsit
+	//albumID := 6651488
+	//songID := 67929161 // track with a single artsit
 	//songID := 67929169 // track with multiple artists
 	//songID :=	"-3040362302" // track that was imported locally
-
-	filePath, err := downloader.downloadTrack(ctx, songID)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(filePath)
-	/*
-	licenseToken, err := client.getLicenseToken(arl)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	trackToken, err := client.getTrackToken(arl, songID)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	trackURL, err := client.getTrackURL(licenseToken, trackToken)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	trackInfo, err := client.getTrackInfo(ctx, songID)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fileName, err := downloader.downloadTrack(trackURL, trackInfo)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = client.addMetadata(ctx, fileName, trackInfo)
-	if err != nil {
-		log.Fatal(err)
-	}
-	*/
-	//data, err := fetchPlaylist(playlistID)
-	//if err != nil ctx, {
-	//	log.Fatal(err)
-	//}
-	//var data Albums
-
-	//albums, err := client.fetchAlbums(ctx, userID)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//for _, album := range albums {
-	//	fmt.Println(album)
-	//}
-
-	//favoriteTracks, err := fetchFavoriteTracks(userID)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//for _, track := range favoriteTracks {
-	//	fmt.Println(track)
-	//}
-
 }
