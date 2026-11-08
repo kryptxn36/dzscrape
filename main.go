@@ -8,23 +8,27 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	_"log"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	_"strconv"
+	"strconv"
+	_ "strconv"
 	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/schollz/progressbar/v3"
 	"go.senan.xyz/taglib"
 	"golang.org/x/crypto/blowfish"
+	"golang.org/x/sync/errgroup"
 )
 
 type Playlist struct {
@@ -52,7 +56,9 @@ type Playlist struct {
 	MD5Image      string  `json:"md5_image"`
 	PictureType   string  `json:"picture_type"`
 	Creator       Creator `json:"creator"`
-	Tracks        Tracks  `json:"tracks"`
+	Tracks	struct{
+		Data []Track	`json:"data"`
+	}	`json:"tracks"`
 }
 
 type Creator struct {
@@ -60,11 +66,6 @@ type Creator struct {
 	Name      string `json:"name"`
 	Tracklist string `json:"tracklist"`
 	Type      string `json:"type"`
-}
-
-type Tracks struct {
-	Data     []PlaylistData `json:"data"`
-	Checksum string         `json:"checksum"`
 }
 
 type PlaylistData struct {
@@ -109,23 +110,24 @@ type Albums struct {
 }
 
 type Album struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Link        string `json:"link"`
-	Upc         string `json:"upc"`
-	Cover       string `json:"cover"`
-	CoverSmall  string `json:"cover_small"`
-	CoverMedium string `json:"cover_medium"`
-	CoverBig    string `json:"cover_big"`
-	CoverXL     string `json:"cover_xl"`
-	MD5Image    string `json:"md5_image"`
+	ID          int		   `json:"id"`
+	Title       string	   `json:"title"`
+	Link        string	   `json:"link"`
+	Upc         string	   `json:"upc"`
+	Cover       string	   `json:"cover"`
+	CoverSmall  string	   `json:"cover_small"`
+	CoverMedium string	   `json:"cover_medium"`
+	CoverBig    string	   `json:"cover_big"`
+	CoverXL     string	   `json:"cover_xl"`
+	MD5Image    string	   `json:"md5_image"`
 	Genres      struct {
 		Data []GenreData `json:"data"`
 	} `json:"genres"`
-	Label     string `json:"label"`
-	Tracklist string `json:"tracklist"`
-	Type      string `json:"type"`
-	Artist    Artist `json:"artist"`
+	Label     string 	`json:"label"`
+	Tracklist string 	`json:"tracklist"`
+	Type      string 	`json:"type"`
+	Tracks	  []Track 	`json:"tracks"`
+	Artist    Artist 	`json:"artist"`
 }
 
 type GenreData struct {
@@ -205,14 +207,14 @@ type Track struct {
 	BPM                   float64        `json:"bpm"`
 	Gain                  float64        `json:"gain"`
 	AvailableCountries    []string       `json:"available_countries"`
-	Contributors          []Contributors `json:"contributors"`
+	Contributors          []Contributor `json:"contributors"`
 	MD5Image              string         `json:"md5_image"`
 	TrackToken            string         `json:"track_token"`
 	Artist                Artist         `json:"artist"`
 	Album                 Album          `json:"album"`
 }
 
-type Contributors struct {
+type Contributor struct {
 	ID            int    `json:"id"`
 	Name          string `json:"name"`
 	Link          string `json:"link"`
@@ -249,7 +251,7 @@ type Client struct {
 	arl          string
 }
 
-func initClient(arl string) *Client {
+func InitClient(arl string) *Client {
 	jar, _ := cookiejar.New(nil)
 	return &Client{
 		http: &http.Client{
@@ -399,7 +401,7 @@ return nil, fmt.Errorf("get user %d albums: %w", uid, err)
 }
 
 
-func (c *Client) fetchFavoriteTracks(ctx context.Context, uid int) ([]Track, error) {
+func (c *Client) GetUserTracks(ctx context.Context, uid int) ([]Track, error) {
 	var tracks []Track
 	next := fmt.Sprintf("/user/%d/tracks", uid)
 
@@ -721,7 +723,24 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (d *Downloader) GetCover(ctx context.Context, albumID int) {}
+func (d *Downloader) GetCover(ctx context.Context, albumID int) ([]byte, error) {
+	album, err := d.getAlbum(ctx, albumID)
+	if err != nil {
+		return nil, err
+	}
+
+	coverURL := album.CoverBig
+
+	resp, err := d.client.http.Get(coverURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	cover, err := io.ReadAll(resp.Body)
+	return cover, nil
+
+}
 
 func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) error {
 
@@ -758,19 +777,14 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 	}
 	err = taglib.WriteTags(path, tags, 0)
 
-	coverURL := track.Album.CoverBig
-
-	resp, err := d.client.http.Get(coverURL)
+	cover, err := d.GetCover(ctx, album.ID)
 	if err != nil {
 		return err
 	}
 
-	var cover bytes.Buffer
-
-	_, err = io.Copy(&cover, resp.Body)
 	err = taglib.WriteImageOptions(
 		path,
-		cover.Bytes(), 0,
+		cover, 0,
 		"Front Cover",
 		"Front artwork",
 		"image/jpeg")
@@ -781,7 +795,6 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 
 	return nil
 }
-
 
 func (d *Downloader) getAlbum(ctx context.Context, id int) (Album, error) {
 	d.mu.Lock()
@@ -823,6 +836,17 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 		return "", fmt.Errorf("Get track %d: %w", trackID, err)
 	}
 
+	finalPath := filepath.Join(
+		d.outDir,
+		formatTrackName(track) + ".mp3",
+	)
+	
+	if _, err := os.Stat(finalPath); err == nil {
+		fmt.Printf("Skipping: '%s' - file exists\n", finalPath)
+		return "", nil
+	}
+	fmt.Printf("Downloading: '%s - %s'...\n", track.Artist.Name, track.Title)
+
 	licenseToken, err := d.client.getLicenseToken(ctx, d.client.arl)
 	d.licenseToken = licenseToken
 	trackToken, err := d.client.getTrackToken(d.client.arl, trackID)
@@ -854,11 +878,6 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 		return "", fmt.Errorf("Close track %d: %w", trackID, err)
 	}
 
-	finalPath := filepath.Join(
-		d.outDir,
-		formatTrackName(track) + ".mp3",
-	)
-
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 			return "", fmt.Errorf("Rename track %d: %w", trackID, err)
 		}
@@ -870,7 +889,48 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 	return finalPath, nil
 }
 
-func initDownloader(ctx context.Context, c *Client, outDir string, force bool) (*Downloader, error) {
+func (d *Downloader) downloadAll(ctx context.Context, tracks []Track) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(3)
+	
+	for _, track := range tracks {
+		g.Go(func() error {
+			_, err := d.DownloadTrack(ctx, track.ID)
+			return err
+		})
+	}
+
+	return g.Wait()
+}
+
+func (d *Downloader) DownloadPlaylist(ctx context.Context, id int) error {
+	playlist, err := d.client.GetPlaylist(ctx, id); if err != nil {
+		return err
+	}
+	d.downloadAll(ctx, playlist.Tracks.Data)
+	return nil
+}
+
+func (d *Downloader) DownloadFavorite(ctx context.Context, uid int) error {
+	tracks, err := d.client.GetUserTracks(ctx, uid)
+	if err != nil {
+		return err
+	}
+	d.downloadAll(ctx, tracks)
+	return nil
+}
+
+func (d *Downloader) DownloadAlbum(ctx context.Context, id int) error {
+	album, err := d.getAlbum(ctx, id)
+	if err != nil {
+		return err
+	}
+	d.downloadAll(ctx, album.Tracks)
+	return nil
+}
+
+
+func InitDownloader(ctx context.Context, c *Client, outDir string, force bool) (*Downloader, error) {
 	if err := os.Mkdir(outDir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("Failed to create directory: %w", err)
 	}
@@ -894,19 +954,127 @@ func initDownloader(ctx context.Context, c *Client, outDir string, force bool) (
 
 }
 
-func main() {
-	//arl := os.Getenv("DEEZER_ARL")
+func run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("No commands were provided")
+	}
+
+	switch args[0] {
+	case "track":
+		return	runTrack(ctx, args[1:])
+	case "playlist":
+		return	runPlaylist(ctx, args[1:])
+	//case "album":
+	//	return	runAlbum(ctx, args[1:])
+	//case "favorites":
+	//	return	runFavorites(ctx, args[1:])
+	default:
+		return fmt.Errorf("Unknown command %q", args[0])
+	}
 	//uid, _ := strconv.Atoi(os.Getenv("DEEZER_UID"))
-	//client := initClient(arl)
 	//ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	//defer stop()
-	//downloader, err := initDownloader(ctx, client, "downloads", false)
+	//downloader, err := InitDownloader(ctx, client, "downloads", false)
 	//if err != nil{
 	//	log.Fatal(err)
 	//}
+}
 
+func runTrack(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("track", flag.ContinueOnError)
+	outDir := fs.String("out", "downloads", "output directory")
+	force := fs.Bool("force", false, "overwrite existing files")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape track [flags] <track-id>")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("track: expected exactly one track ID")
+	}
+
+	id, err := strconv.Atoi(fs.Arg(0))
+	if err != nil || id <= 0 {
+		return fmt.Errorf("Invalid track ID %q", fs.Arg(0))
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	downloader, err := InitDownloader(ctx, client, *outDir, *force)
+	
+	if err != nil {
+		return err
+	}
+	path, err := downloader.DownloadTrack(ctx, id)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Saved: %s", path)
+	return nil
+}
+
+func runPlaylist(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("playlist", flag.ContinueOnError)
+	force := fs.Bool("force", false, "overwrite existing files")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape track [flags] <track-id>")
+		fs.PrintDefaults()
+	}
+
+
+	id, err := strconv.Atoi(fs.Arg(0))
+	if err != nil || id <= 0 {
+		return fmt.Errorf("Invalid playlist ID %q", fs.Arg(0))
+	}
+	
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	playlist, err := client.GetPlaylist(ctx, id)
+
+	outDir := fs.String("out", fmt.Sprintf("downloads/%s", playlist.Title), "output directory")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("playlist: expected exactly one playlist ID")
+	}
+
+	downloader, err := InitDownloader(ctx, client, *outDir, *force)
+	
+	if err != nil {
+		return err
+	}
+	if err := downloader.DownloadPlaylist(ctx, id); err != nil {
+		return err
+	}
+	fmt.Printf("Playlist saved to %s", *outDir)
+	return nil
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if err := run(ctx, os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "Error: ", err)
+		os.Exit(1)
+	}
 	//albumID := 6651488
 	//songID := 67929161 // track with a single artsit
 	//songID := 67929169 // track with multiple artists
 	//songID :=	"-3040362302" // track that was imported locally
+	//_, err = downloader.DownloadTrack(ctx, songID)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
+
+	//downloader.DownloadTrack(ctx, songID)
+
 }
