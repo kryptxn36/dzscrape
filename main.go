@@ -126,7 +126,9 @@ type Album struct {
 	Label     string 	`json:"label"`
 	Tracklist string 	`json:"tracklist"`
 	Type      string 	`json:"type"`
-	Tracks	  []Track 	`json:"tracks"`
+	Tracks	  struct {
+		Data	[]Track	`json:"data"`
+	}
 	Artist    Artist 	`json:"artist"`
 }
 
@@ -729,16 +731,31 @@ func (d *Downloader) GetCover(ctx context.Context, albumID int) ([]byte, error) 
 		return nil, err
 	}
 
-	coverURL := album.CoverBig
+	var coverURL string
+	if album.CoverBig != "" {
+		coverURL = album.CoverBig
+	} else if album.CoverMedium != "" {
+		coverURL = album.CoverMedium
+	} else if album.CoverSmall != "" {
+		coverURL = album.CoverSmall
+	}
 
-	resp, err := d.client.http.Get(coverURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, coverURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := d.client.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	cover, err := io.ReadAll(resp.Body)
-	return cover, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cover GET: %s", resp.Status)
+	}
+
+	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 
 }
 
@@ -775,10 +792,14 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 		"Year":             {fmt.Sprintf("%d", releaseDate.Year())},
 		"Gain":             {fmt.Sprintf("%f", track.Gain)},
 	}
-	err = taglib.WriteTags(path, tags, 0)
 
 	cover, err := d.GetCover(ctx, album.ID)
 	if err != nil {
+		return fmt.Errorf("Get cover: %w", err)
+	}
+
+
+	if err = taglib.WriteTags(path, tags, 0); err != nil {
 		return err
 	}
 
@@ -826,7 +847,17 @@ type Downloader struct {
 }
 
 
-func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, error) {
+func (d *Downloader) DownloadTrack(
+	ctx context.Context,
+	trackID int,
+) (string, error) {
+	return d.downloadTrack(ctx, trackID, formatTrackName)
+}
+
+func (d *Downloader) downloadTrack(ctx context.Context,
+	trackID int,
+	filename FilenameFunc,
+) (string, error) {
 	if trackID <= 0 {
 		return "", fmt.Errorf("Invalid track ID: %d", trackID)
 	}
@@ -838,7 +869,7 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 
 	finalPath := filepath.Join(
 		d.outDir,
-		formatTrackName(track) + ".mp3",
+		filename(track) + ".mp3",
 	)
 	
 	if _, err := os.Stat(finalPath); err == nil {
@@ -847,12 +878,7 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 	}
 	fmt.Printf("Downloading: '%s - %s'...\n", track.Artist.Name, track.Title)
 
-	licenseToken, err := d.client.getLicenseToken(ctx, d.client.arl)
-	d.licenseToken = licenseToken
-	trackToken, err := d.client.getTrackToken(d.client.arl, trackID)
-	if err != nil {
-		return "", fmt.Errorf("Failed to get token for track with id %d: %w", trackID, err)
-	}
+	trackToken := track.TrackToken
 
 	trackURL, err := d.client.getTrackURL(d.licenseToken, trackToken)
 	if err != nil {
@@ -878,36 +904,55 @@ func (d *Downloader) DownloadTrack(ctx context.Context, trackID int) (string, er
 		return "", fmt.Errorf("Close track %d: %w", trackID, err)
 	}
 
+	if err := d.addMetadata(ctx, tmpPath, track); err != nil {
+		return "", fmt.Errorf("Write metadata: %w", err)
+	}
+
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 			return "", fmt.Errorf("Rename track %d: %w", trackID, err)
 		}
 
-	if err := d.addMetadata(ctx, finalPath, track); err != nil {
-		return "", fmt.Errorf("Write metadata: %w", err)
-	}
 
 	return finalPath, nil
 }
 
-func (d *Downloader) downloadAll(ctx context.Context, tracks []Track) error {
-	g, ctx := errgroup.WithContext(ctx)
+func (d *Downloader) downloadAll(ctx context.Context,
+	tracks []Track,
+	filename FilenameFunc,
+)	error {
+	var (
+		g	errgroup.Group
+		mu sync.Mutex
+		errs []error
+	)
+
 	g.SetLimit(3)
 	
 	for _, track := range tracks {
+		if ctx.Err() != nil {
+			break
+		}
 		g.Go(func() error {
-			_, err := d.DownloadTrack(ctx, track.ID)
-			return err
+			if _, err := d.downloadTrack(ctx, track.ID, filename); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("track '%s - %s': %w", track.Artist.Name, track.Title, err))
+				mu.Unlock()
+			}
+			return nil
 		})
 	}
 
-	return g.Wait()
+	_ = g.Wait()
+	return errors.Join(errs...)
 }
 
 func (d *Downloader) DownloadPlaylist(ctx context.Context, id int) error {
 	playlist, err := d.client.GetPlaylist(ctx, id); if err != nil {
 		return err
 	}
-	d.downloadAll(ctx, playlist.Tracks.Data)
+	if err := d.downloadAll(ctx, playlist.Tracks.Data, formatTrackName); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -916,8 +961,22 @@ func (d *Downloader) DownloadFavorite(ctx context.Context, uid int) error {
 	if err != nil {
 		return err
 	}
-	d.downloadAll(ctx, tracks)
+	if err := d.downloadAll(ctx, tracks, formatTrackName); err != nil {
+		return err
+	}
 	return nil
+}
+
+type FilenameFunc func(Track) string
+
+func albumFilenameFunc(tracks []Track) FilenameFunc {
+	return func(track Track) string {
+		name := formatTrackName(track)
+		if track.TrackPosition <= 0 {
+			return name
+		}
+		return fmt.Sprintf("%02d. %s", track.TrackPosition, name)
+	}
 }
 
 func (d *Downloader) DownloadAlbum(ctx context.Context, id int) error {
@@ -925,8 +984,7 @@ func (d *Downloader) DownloadAlbum(ctx context.Context, id int) error {
 	if err != nil {
 		return err
 	}
-	d.downloadAll(ctx, album.Tracks)
-	return nil
+	return d.downloadAll(ctx, album.Tracks.Data, albumFilenameFunc(album.Tracks.Data))
 }
 
 
@@ -964,10 +1022,10 @@ func run(ctx context.Context, args []string) error {
 		return	runTrack(ctx, args[1:])
 	case "playlist":
 		return	runPlaylist(ctx, args[1:])
-	//case "album":
-	//	return	runAlbum(ctx, args[1:])
-	//case "favorites":
-	//	return	runFavorites(ctx, args[1:])
+	case "favorites":
+		return	runFavorites(ctx, args[1:])
+	case "album":
+		return	runAlbum(ctx, args[1:])
 	default:
 		return fmt.Errorf("Unknown command %q", args[0])
 	}
@@ -992,7 +1050,7 @@ func runTrack(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	
+
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return errors.New("track: expected exactly one track ID")
@@ -1021,10 +1079,13 @@ func runPlaylist(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("playlist", flag.ContinueOnError)
 	force := fs.Bool("force", false, "overwrite existing files")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: dzscrape track [flags] <track-id>")
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape playlist [flags] <playlist-id>")
 		fs.PrintDefaults()
 	}
 
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil || id <= 0 {
@@ -1036,13 +1097,10 @@ func runPlaylist(ctx context.Context, args []string) error {
 
 	outDir := fs.String("out", fmt.Sprintf("downloads/%s", playlist.Title), "output directory")
 
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
 
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("playlist: expected exactly one playlist ID")
+		return errors.New("Playlist: expected exactly one playlist ID")
 	}
 
 	downloader, err := InitDownloader(ctx, client, *outDir, *force)
@@ -1053,10 +1111,85 @@ func runPlaylist(ctx context.Context, args []string) error {
 	if err := downloader.DownloadPlaylist(ctx, id); err != nil {
 		return err
 	}
-	fmt.Printf("Playlist saved to %s", *outDir)
+	fmt.Printf("Playlist saved to %s\n", *outDir)
 	return nil
 }
 
+func runFavorites(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("favorites", flag.ContinueOnError)
+	outDir := fs.String("out", "downloads/favorites", "output directory")
+	force := fs.Bool("force", false, "overwrite existing files")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape favorites [flags] <user-id>")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("favorites: expected exactly one user ID")
+	}
+
+	id, err := strconv.Atoi(fs.Arg(0))
+	if err != nil || id <= 0 {
+		return fmt.Errorf("Invalid user ID %q", fs.Arg(0))
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	downloader, err := InitDownloader(ctx, client, *outDir, *force)
+	
+	if err != nil {
+		return err
+	}
+	if err := downloader.DownloadFavorite(ctx, id); err != nil {
+		return err
+	}
+	fmt.Printf("Saved: %s", *outDir)
+	return nil
+}
+
+func runAlbum(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("album", flag.ContinueOnError)
+	force := fs.Bool("force", false, "overwrite existing files")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape album [flags] <album-id>")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	id, err := strconv.Atoi(fs.Arg(0))
+	if err != nil || id <= 0 {
+		return fmt.Errorf("Invalid album ID %q", fs.Arg(0))
+	}
+	
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	album, err := client.GetAlbum(ctx, id)
+
+	outDir := fs.String("out", fmt.Sprintf("downloads/albums/%s", album.Title) , "output directory")
+
+
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("Album: expected exactly one album ID")
+	}
+
+	downloader, err := InitDownloader(ctx, client, *outDir, *force)
+	
+	if err != nil {
+		return err
+	}
+	if err := downloader.DownloadAlbum(ctx, id); err != nil {
+		return err
+	}
+	fmt.Printf("Album saved to %s\n", *outDir)
+	return nil
+}
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -1073,8 +1206,6 @@ func main() {
 	//if err != nil {
 	//	log.Fatal(err)
 	//}
-
-
 	//downloader.DownloadTrack(ctx, songID)
 
 }
