@@ -304,27 +304,35 @@ func (c *Client) getJSON(ctx context.Context, baseURL, path string, v any) error
 	}
 
 	response, err := c.http.Do(req)
-
 	if err != nil {
+		if response != nil {
+			response.Body.Close()
+		}
+		return fmt.Errorf("GET %s: %w", u, err)
+	}
+	defer response.Body.Close()
 
-		if response.StatusCode != http.StatusOK {
-			if response.StatusCode == http.StatusForbidden ||
-				response.StatusCode == http.StatusUnauthorized {
-				defer response.Body.Close()
-				return fatal(fmt.Errorf("GET %s: %s", u, response.Status))
-			} else if slices.Contains(softErrors, response.StatusCode) {
-				defer response.Body.Close()
-				return fmt.Errorf("GET %s: %s", u, response.Status)
-			}
+	if response.StatusCode != http.StatusOK {
+		switch {
+		case response.StatusCode == http.StatusUnauthorized ||
+			response.StatusCode == http.StatusForbidden:
+			return fatal(fmt.Errorf("GET %s: %s", u, response.Status))
+
+		case response.StatusCode == http.StatusNotFound:
+			return fmt.Errorf("GET %s: %s", u, response.Status)
+
+		case slices.Contains(softErrors, response.StatusCode):
+			return fmt.Errorf("GET %s: %s", u, response.Status)
+
+		default:
+			return fmt.Errorf("GET %s: %s", u, response.Status)
 		}
 	}
 
-	defer response.Body.Close()
-
-	err = json.NewDecoder(response.Body).Decode(v)
-	if err != nil {
+	if err := json.NewDecoder(response.Body).Decode(v); err != nil {
 		return fmt.Errorf("decode %s: %w", u, err)
 	}
+
 	return nil
 }
 
@@ -668,20 +676,36 @@ func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
 	return "", err
 }
 
+var unsafeFilenameChars = strings.NewReplacer(
+	"/", "_",
+	"\\", "_",
+	":", "_",
+	"*", "_",
+	"?", "_",
+	"\"", "_",
+	"<", "_",
+	">", "_",
+	"|", "_",
+)
+
+func sanitizeFilename(name string) string {
+	name = strings.TrimSpace(name)
+	name = unsafeFilenameChars.Replace(name)
+	name = strings.Trim(name, ". ")
+
+	if name == "" {
+		return "track"
+	}
+
+	runes := []rune(name)
+	if len(runes) > 200 {
+		name = string(runes[:200])
+	}
+
+	return name
+}
 func formatTrackName(trackInfo Track) string {
 	var artistsBuilder strings.Builder
-
-	var unsafeFilenameChars = strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-	)
 
 	for i, contributor := range trackInfo.Contributors {
 		artistsBuilder.WriteString(contributor.Name)
@@ -1037,14 +1061,22 @@ func albumFilenameFunc(tracks []Track) FilenameFunc {
 }
 
 func (d *Downloader) DownloadAlbum(ctx context.Context, id int) error {
-	path := fmt.Sprintf("/album/%d/tracks", id)
-	var tracks Page[Track]
+	var tracks []Track
 
-	if err := d.client.getJSON(ctx, d.client.apiBaseURL, path, &tracks); err != nil {
+	next := fmt.Sprintf("/album/%d/tracks", id)
+
+	for next != "" {
+		var page Page[Track]
+
+	if err := d.client.getJSON(ctx, d.client.apiBaseURL, next, &page); err != nil {
 		return err
 	}
 
-	return d.downloadAll(ctx, tracks.Data, albumFilenameFunc(tracks.Data))
+	tracks = append(tracks, page.Data...)
+	next = page.Next
+	}
+
+	return d.downloadAll(ctx, tracks, albumFilenameFunc(tracks))
 }
 
 func InitDownloader(ctx context.Context, c *Client, outDir string, force bool) (*Downloader, error) {
@@ -1211,14 +1243,21 @@ func runFavorites(ctx context.Context, args []string) error {
 
 func runAlbum(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("album", flag.ContinueOnError)
+	outDir := fs.String("out", "", "output directory")
 	force := fs.Bool("force", false, "overwrite existing files")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: dzscrape album [flags] <album-id>")
 		fs.PrintDefaults()
 	}
 
-	if err := fs.Parse(args); err != nil {
-		return err
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return errors.New("Album: expected exactly one album ID")
 	}
 
 	id, err := strconv.Atoi(fs.Arg(0))
@@ -1228,12 +1267,9 @@ func runAlbum(ctx context.Context, args []string) error {
 
 	client := InitClient(os.Getenv("DEEZER_ARL"))
 	album, err := client.GetAlbum(ctx, id)
-
-	outDir := fs.String("out", fmt.Sprintf("downloads/albums/%s", album.Title), "output directory")
-
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return errors.New("Album: expected exactly one album ID")
+	if *outDir == "" {
+		dirName := sanitizeFilename(album.Artist.Name + " - " + album.Title)
+		*outDir = filepath.Join("downloads", "albums", dirName)
 	}
 
 	downloader, err := InitDownloader(ctx, client, *outDir, *force)
