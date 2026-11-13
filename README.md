@@ -1,1 +1,1 @@
-# dzscraper
+# dzscrape
