@@ -57,6 +57,8 @@ type Playlist struct {
 	ModDate       string  `json:"mod_date"`
 	MD5Image      string  `json:"md5_image"`
 	PictureType   string  `json:"picture_type"`
+	ReleaseDate   string
+	ExplicitLyrics	bool
 	Creator       struct {
 		ID        int    `json:"id"`
 		Name      string `json:"name"`
@@ -1435,12 +1437,21 @@ func (a Album) HasExplicitLyrics() bool {
 	return a.ExplicitLyrics
 }
 
+func (p Playlist) HasExplicitLyrics() bool {
+	return p.ExplicitLyrics
+}
+
 func (t Track) GetReleaseDate() string {
 	return t.ReleaseDate
 }
 
+
 func (a Album) GetReleaseDate() string {
 	return a.ReleaseDate
+}
+
+func (p Playlist) GetReleaseDate() string {
+	return p.ReleaseDate
 }
 
 func (t Track) GetDuration() int {
@@ -1631,10 +1642,10 @@ BPM: %f
 Rank: %d
 Explicit lyrics: %t
 Label: %s
-Cover (small): %s,
-Cover (medium): %s,
-Cover (big): %s,
-Cover (XL): %s,
+Cover (small): %s
+Cover (medium): %s
+Cover (big): %s
+Cover (XL): %s
 `,
 	track.Title,
 	track.Artist.Name,
@@ -1712,10 +1723,10 @@ Explicit lyrics: %t
 Label: %s
 Tracklist:
 %s
-Cover (small): %s,
-Cover (medium): %s,
-Cover (big): %s,
-Cover (XL): %s,
+Cover (small): %s
+Cover (medium): %s
+Cover (big): %s
+Cover (XL): %s
 `,
 	album.Title,
 	album.Artist.Name,
@@ -1733,17 +1744,29 @@ Cover (XL): %s,
 	)
 }
 
+func formatPlaylistTracklist(playlist Playlist) string {
+	var tracklist string
+	for _, track := range playlist.Tracks.Data {
+		artists := getArtists(track)
+		tracklist += fmt.Sprintf("%s - %s\n", artists, track.Title)
+	}
+	return tracklist
+}
+
 func formatPlaylistShowResult(playlist Playlist) string {
 	return fmt.Sprintf(
 `Title: %s
 Creator: %s
 Duration: %s
 Creation date: %s
+Tracklist:
+%s
 `,
 	playlist.Title,
 	playlist.Creator.Name,
 	formatDuration(playlist),
 	playlist.CreationDate,
+	formatPlaylistTracklist(playlist),
 	)
 }
 
@@ -1757,8 +1780,8 @@ func runShow(ctx context.Context, args []string) error {
 		return runShowTrack(ctx, args[1:])
 	case "album":
 		return runShowAlbum(ctx, args[1:])
-	//case "playlist":
-	//	return runShowPlaylist(ctx, args[1:])
+	case "playlist":
+		return runShowPlaylist(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown show option %q", args[0])
 	}
@@ -1805,7 +1828,7 @@ func runShowPlaylist(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(formatPlaylistShowResult(client, ctx, playlist))
+	fmt.Println(formatPlaylistShowResult(playlist))
 	return nil
 }
 
