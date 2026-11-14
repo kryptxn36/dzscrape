@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -56,17 +57,21 @@ type Playlist struct {
 	ModDate       string  `json:"mod_date"`
 	MD5Image      string  `json:"md5_image"`
 	PictureType   string  `json:"picture_type"`
-	Creator       Creator `json:"creator"`
+	Creator       struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		Tracklist string `json:"tracklist"`
+		Type      string `json:"type"`
+	} `json:"creator"`
+	User       	struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		Tracklist string `json:"tracklist"`
+		Type      string `json:"type"`
+	} `json:"user"`
 	Tracks        struct {
 		Data []Track `json:"data"`
 	} `json:"tracks"`
-}
-
-type Creator struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	Tracklist string `json:"tracklist"`
-	Type      string `json:"type"`
 }
 
 type PlaylistData struct {
@@ -115,16 +120,20 @@ type Album struct {
 	Title       string `json:"title"`
 	Link        string `json:"link"`
 	Upc         string `json:"upc"`
+	NbTracks	int		`json:"nb_tracks"`
 	Cover       string `json:"cover"`
 	CoverSmall  string `json:"cover_small"`
 	CoverMedium string `json:"cover_medium"`
 	CoverBig    string `json:"cover_big"`
 	CoverXL     string `json:"cover_xl"`
 	MD5Image    string `json:"md5_image"`
+	ReleaseDate           string        `json:"release_date"`
+	ExplicitLyrics        bool   `json:"explicit_lyrics"`
 	Genres      struct {
 		Data []GenreData `json:"data"`
 	} `json:"genres"`
 	Label     string `json:"label"`
+	Duration     int `json:"duration"`
 	Tracklist string `json:"tracklist"`
 	Type      string `json:"type"`
 	Tracks    struct {
@@ -621,7 +630,35 @@ func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
 
 	type getURLResponse struct {
 		Data []data `json:"data"`
+		Errors []DeezerError `json:"errors"`
 	}
+
+	firstMediaURL := func(resp getURLResponse) (string, error) {
+		for _, dataItem := range resp.Data {
+			if len(dataItem.Media) == 0 {
+				continue
+			}
+			for _, mediaItem := range dataItem.Media {
+				if len(mediaItem.Sources) == 0 {
+					continue
+				}
+				for _, source := range mediaItem.Sources {
+					if len(source.URL) == 0 {
+						continue
+					}
+					url := source.URL
+					return url, nil
+				}
+			}
+		}
+		if len(resp.Errors) > 0 {
+			e:= resp.Errors[0]
+			return "", fmt.Errorf("get_url: %s (code %d)", e.Err.Message, e.Err.Code)
+		}
+
+		return "", errors.New("get_url: no media sources")
+	}
+	
 
 	payload, err := createMediaPayload(licenseToken, trackToken)
 	if err != nil {
@@ -647,33 +684,11 @@ func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
 	}
 
 	var result getURLResponse
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
+	return firstMediaURL(result)
 
-	if len(result.Data) == 0 {
-		return "", fmt.Errorf("No data from response")
-	}
-
-	for _, dataItem := range result.Data {
-		if len(dataItem.Media) == 0 {
-			continue
-		}
-		for _, mediaItem := range dataItem.Media {
-			if len(mediaItem.Sources) == 0 {
-				continue
-			}
-			for _, source := range mediaItem.Sources {
-				if len(source.URL) == 0 {
-					continue
-				}
-				url := source.URL
-				return url, nil
-			}
-		}
-	}
-	return "", err
 }
 
 var unsafeFilenameChars = strings.NewReplacer(
@@ -704,19 +719,25 @@ func sanitizeFilename(name string) string {
 
 	return name
 }
-func formatTrackName(trackInfo Track) string {
+
+func getArtists(track Track) string {
+	if len(track.Contributors) == 0 {
+		return track.Artist.Name
+	}
 	var artistsBuilder strings.Builder
 
-	for i, contributor := range trackInfo.Contributors {
+	for i, contributor := range track.Contributors {
 		artistsBuilder.WriteString(contributor.Name)
-		if i < len(trackInfo.Contributors)-1 {
+		if i < len(track.Contributors) - 1 {
 			artistsBuilder.WriteString(", ")
 		}
 	}
-
 	artists := artistsBuilder.String()
-
-	filename := fmt.Sprintf("%s - %s", artists, trackInfo.Title)
+	return artists
+}
+func formatTrackName(track Track) string {
+	artists := getArtists(track)
+	filename := fmt.Sprintf("%s - %s", artists, track.Title)
 	filename = strings.TrimSpace(filename)
 	filename = unsafeFilenameChars.Replace(filename)
 	filename = strings.Trim(filename, ". ")
@@ -809,6 +830,7 @@ func (d *Downloader) GetCover(ctx context.Context, albumID int) ([]byte, error) 
 
 }
 
+
 func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) error {
 
 	artists := make([]string, 0, len(track.Contributors))
@@ -823,11 +845,7 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 		genre = album.Genres.Data[0].Name
 	}
 
-	const dateFormat = "2006-01-02"
-	releaseDate, err := time.Parse(dateFormat, track.ReleaseDate)
-	if err != nil {
-		return err
-	}
+	releaseDate, err := parseReleaseDate(track)
 
 	tags := map[string][]string{
 		taglib.Artist:      artists,
@@ -1028,35 +1046,43 @@ func (d *Downloader) DownloadFavorite(ctx context.Context, uid int) error {
 
 type FilenameFunc func(Track) string
 
-func albumFilenameFunc(tracks []Track) FilenameFunc {
-	multiDisc := false
+func hasMultipleDiscs(tracks []Track) bool {
 	for _, track := range tracks {
 		if track.DiskNumber > 1 {
-			multiDisc = true
-			break
+			return true
 		}
-	}
+}
+	return false
+}
 
+func albumTrackLabel(track Track, multiDisc bool) string {
 	discs := map[int]string{
 		1: "A",
 		2: "B",
 		3: "C",
 		4: "D",
 	}
-
-	return func(track Track) string {
-		name := formatTrackName(track)
-		if track.TrackPosition <= 0 {
-			return name
-		}
 		if multiDisc {
 			disc := track.DiskNumber
 			if disc <= 0 {
 				disc = 1
 			}
-			return fmt.Sprintf("%s%02d. %s", discs[disc], track.TrackPosition, name)
+			return fmt.Sprintf("%s%02d.", discs[disc], track.TrackPosition)
 		}
-		return fmt.Sprintf("%02d. %s", track.TrackPosition, name)
+		return fmt.Sprintf("%02d.", track.TrackPosition)
+}
+
+
+func albumFilenameFunc(tracks []Track) FilenameFunc {
+	multiDisc := hasMultipleDiscs(tracks)
+
+	return func(track Track) string {
+		name := formatTrackName(track)
+		trackLabel := albumTrackLabel(track, multiDisc)
+		if trackLabel == "" {
+			return name
+		}
+		return trackLabel + " " + name
 	}
 }
 
@@ -1103,57 +1129,109 @@ func InitDownloader(ctx context.Context, c *Client, outDir string, force bool) (
 
 }
 
+func printUsage() {
+	name := filepath.Base(os.Args[0])
+	fmt.Fprintf(os.Stderr, `Usage:
+	  %[1]s search track <query>
+	  %[1]s search album <query>
+	  %[1]s search playlist <query>
+	  %[1]s download track [flags] <track-id>
+	  %[1]s download album [flags] <album-id>
+	  %[1]s download playlist [flags] <playlist-id>
+	  %[1]s download favorites [flags] <user-id>
+	  %[1]s show track <track-id>
+	  %[1]s show album <album-id>
+	  %[1]s show playlist <playlist-id>
+	  %[1]s help
+
+	Flags for download commands:
+	  -out string    output directory
+	  -force         overwrite existing files
+	  `, name)
+}
+
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("No commands were provided")
+		printUsage()
+		return errors.New("missing command")
 	}
 
 	switch args[0] {
-	case "track":
-		return runTrack(ctx, "", args[1:])
-	case "playlist":
-		return runPlaylist(ctx, args[1:])
-	case "favorites":
-		return runFavorites(ctx, args[1:])
-	case "album":
-		return runAlbum(ctx, args[1:])
+	case "download":
+		return runDownload(ctx, args[1:])
+	case "search":
+		return runSearch(ctx, args[1:])
+	case "show":
+		return runShow(ctx, args[1:])
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
 	default:
 		return fmt.Errorf("Unknown command %q", args[0])
 	}
-	//uid, _ := strconv.Atoi(os.Getenv("DEEZER_UID"))
-	//ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	//defer stop()
-	//downloader, err := InitDownloader(ctx, client, "downloads", false)
-	//if err != nil{
-	//	log.Fatal(err)
-	//}
 }
 
-func runTrack(ctx context.Context, quality string, args []string) error {
-	fs := flag.NewFlagSet("track", flag.ContinueOnError)
-	outDir := fs.String("out", "downloads", "output directory")
-	force := fs.Bool("force", false, "overwrite existing files")
-	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: dzscrape track [flags] <track-id>")
-		fs.PrintDefaults()
+func runDownload(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("download: expected track, album, playlist or favorites")
 	}
+	
+	switch args[0] {
+	case "track":
+		return runDownloadTrack(ctx, args[1:])
+	case "album":
+		return runDownloadAlbum(ctx, args[1:])
+	case "playlist":
+		return runDownloadPlaylist(ctx, args[1:])
+	case "favorites":
+		return runDownloadFavorites(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown download target %q", args[0])
+	}
+}
 
+func parseSingleID(fs *flag.FlagSet, args []string, kind string) (int, error) {
 	if err := fs.Parse(args); err != nil {
-		return err
+		return 0, err
 	}
-
+	
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("track: expected exactly one track ID")
+		return 0, fmt.Errorf("%s: expected exactly one ID", kind)
 	}
 
 	id, err := strconv.Atoi(fs.Arg(0))
 	if err != nil || id <= 0 {
-		return fmt.Errorf("Invalid track ID %q", fs.Arg(0))
+		return 0, fmt.Errorf("invalid %s ID %q", kind, fs.Arg(0))
+	}
+
+	return id, nil
+}
+
+func defaultDir(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func addDownloadFlags(fs *flag.FlagSet, opts *downloadOptions) {
+	fs.StringVar(&opts.outDir, "out", "", "output directory")
+	fs.BoolVar(&opts.force, "force", false, "overwrite existing files")
+}
+
+func runDownloadTrack(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("download track", flag.ContinueOnError)
+	var opts downloadOptions
+	addDownloadFlags(fs, &opts)
+
+	id, err := parseSingleID(fs, args, "track")
+	if err != nil {
+		return err
 	}
 
 	client := InitClient(os.Getenv("DEEZER_ARL"))
-	downloader, err := InitDownloader(ctx, client, *outDir, *force)
+	downloader, err := InitDownloader(ctx, client, defaultDir(opts.outDir, "downloads"), opts.force)
 
 	if err != nil {
 		return err
@@ -1163,117 +1241,32 @@ func runTrack(ctx context.Context, quality string, args []string) error {
 		return err
 	}
 	fmt.Printf("Saved: %s", path)
+
 	return nil
 }
 
-func runPlaylist(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("playlist", flag.ContinueOnError)
-	force := fs.Bool("force", false, "overwrite existing files")
-	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: dzscrape playlist [flags] <playlist-id>")
-		fs.PrintDefaults()
-	}
+func runDownloadAlbum(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("download album", flag.ContinueOnError)
+	var opts downloadOptions
+	addDownloadFlags(fs, &opts)
 
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return errors.New("Playlist: expected exactly one playlist ID")
-	}
-
-	id, err := strconv.Atoi(fs.Arg(0))
-	if err != nil || id <= 0 {
-		return fmt.Errorf("Invalid playlist ID %q", fs.Arg(0))
-	}
-
-	client := InitClient(os.Getenv("DEEZER_ARL"))
-	playlist, err := client.GetPlaylist(ctx, id)
-
-	outDir := fs.String("out", fmt.Sprintf("downloads/%s", playlist.Title), "output directory")
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	downloader, err := InitDownloader(ctx, client, *outDir, *force)
-
+	id, err := parseSingleID(fs, args, "album")
 	if err != nil {
 		return err
-	}
-	if err := downloader.DownloadPlaylist(ctx, id); err != nil {
-		return err
-	}
-	fmt.Printf("Playlist saved to %s\n", *outDir)
-	return nil
-}
-
-func runFavorites(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("favorites", flag.ContinueOnError)
-	outDir := fs.String("out", "downloads/favorites", "output directory")
-	force := fs.Bool("force", false, "overwrite existing files")
-	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: dzscrape favorites [flags] <user-id>")
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return errors.New("favorites: expected exactly one user ID")
-	}
-
-	id, err := strconv.Atoi(fs.Arg(0))
-	if err != nil || id <= 0 {
-		return fmt.Errorf("Invalid user ID %q", fs.Arg(0))
-	}
-
-	client := InitClient(os.Getenv("DEEZER_ARL"))
-	downloader, err := InitDownloader(ctx, client, *outDir, *force)
-
-	if err != nil {
-		return err
-	}
-	if err := downloader.DownloadFavorite(ctx, id); err != nil {
-		return err
-	}
-	fmt.Printf("Saved: %s", *outDir)
-	return nil
-}
-
-func runAlbum(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("album", flag.ContinueOnError)
-	outDir := fs.String("out", "", "output directory")
-	force := fs.Bool("force", false, "overwrite existing files")
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: dzscrape album [flags] <album-id>")
-		fs.PrintDefaults()
-	}
-
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return errors.New("Album: expected exactly one album ID")
-	}
-
-	id, err := strconv.Atoi(fs.Arg(0))
-	if err != nil || id <= 0 {
-		return fmt.Errorf("Invalid album ID %q", fs.Arg(0))
 	}
 
 	client := InitClient(os.Getenv("DEEZER_ARL"))
 	album, err := client.GetAlbum(ctx, id)
-	if *outDir == "" {
-		dirName := sanitizeFilename(album.Artist.Name + " - " + album.Title)
-		*outDir = filepath.Join("downloads", "albums", dirName)
+
+	if err != nil {
+		return err
 	}
-
-	downloader, err := InitDownloader(ctx, client, *outDir, *force)
-
+	dir := opts.outDir
+	if dir == "" {
+		dir = filepath.Join("downloads", "albums",
+		sanitizeFilename(album.Artist.Name + " - " + album.Title))
+	}
+	downloader, err := InitDownloader(ctx, client, dir, opts.force)
 	if err != nil {
 		return err
 	}
@@ -1281,7 +1274,538 @@ func runAlbum(ctx context.Context, args []string) error {
 	if err := downloader.DownloadAlbum(ctx, id); err != nil {
 		return err
 	}
-	fmt.Printf("Album saved to %s\n", *outDir)
+
+	fmt.Printf("Album saved to %s\n", dir)
+	return nil
+}
+
+func runDownloadPlaylist(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("download playlist", flag.ContinueOnError)
+	var opts downloadOptions
+	addDownloadFlags(fs, &opts)
+
+	id, err := parseSingleID(fs, args, "playlist")
+	if err != nil {
+		return err
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	playlist, err := client.GetPlaylist(ctx, id)
+
+	if err != nil {
+		return err
+	}
+	dir := opts.outDir
+	if dir == "" {
+		dir = filepath.Join("downloads", "playlists",
+		sanitizeFilename(playlist.Title))
+	}
+	downloader, err := InitDownloader(ctx, client, dir, opts.force)
+	if err != nil {
+		return err
+	}
+
+	if err := downloader.DownloadPlaylist(ctx, id); err != nil {
+		return err
+	}
+
+	fmt.Printf("Playlist saved to %s\n", dir)
+	return nil
+}
+
+func runDownloadFavorites(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("download favorites", flag.ContinueOnError)
+	var opts downloadOptions
+	addDownloadFlags(fs, &opts)
+
+	id, err := parseSingleID(fs, args, "favorites")
+	if err != nil {
+		return err
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+
+	dir := opts.outDir
+	if dir == "" {
+		dir = filepath.Join("downloads", "favorites")
+	}
+
+	downloader, err := InitDownloader(ctx, client, dir, opts.force)
+	if err != nil {
+		return err
+	}
+
+	if err := downloader.DownloadFavorite(ctx, id); err != nil {
+		return err
+	}
+
+	fmt.Printf("Saved to %s\n", dir)
+	return nil
+}
+
+
+type downloadOptions struct {
+	outDir	string
+	force bool
+}
+
+func search[T any](
+	ctx context.Context,
+	c *Client,
+	kind, query string,
+	limit int,
+) ([]T, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("empty search query")
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	q := url.Values{}
+	q.Set("q", query)
+	q.Set("limit", strconv.Itoa(limit))
+
+	path := "/search/" + kind + "?" + q.Encode()
+
+	var page Page[T]
+	if err := c.getJSON(ctx, c.apiBaseURL, path, &page); err != nil {
+		return nil, fmt.Errorf("search %s %q: %w", kind, query, err)
+	}
+
+	return page.Data, nil
+}
+
+func (c *Client) SearchTrack(ctx context.Context, query string, limit int) ([]Track, error) {
+	return search[Track](ctx, c, "track", query, limit)
+}
+
+func (c *Client) SearchAlbum(ctx context.Context, query string, limit int) ([]Album, error) {
+	return search[Album](ctx, c, "album", query, limit)
+}
+
+func (c *Client) SearchPlaylist(ctx context.Context, query string, limit int) ([]Playlist, error) {
+	return search[Playlist](ctx, c, "playlist", query, limit)
+}
+
+func (c *Client) SearchArtist(ctx context.Context, query string, limit int) ([]Artist, error) {
+	return search[Artist](ctx, c, "artist", query, limit)
+}
+
+
+func runSearch(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("search: expected track, album, playlist, or artist")
+	}
+
+	switch args[0] {
+	case "track":
+		return runSearchTrack(ctx, args[1:])
+	case "album":
+		return runSearchAlbum(ctx, args[1:])
+	case "playlist":
+		return runSearchPlaylist(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown search type %q", args[0])
+	}
+}
+
+func parseSearchQuery(fs *flag.FlagSet, args []string, kind string) (string, error) {
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return "", fmt.Errorf("search %s: query required", kind)
+	}
+	return strings.Join(fs.Args(), " "), nil
+}
+
+type Media interface {
+	HasExplicitLyrics() bool
+	GetReleaseDate() string
+	GetDuration()	int
+}
+
+func (t Track) HasExplicitLyrics() bool {
+	return t.ExplicitLyrics
+}
+
+func (a Album) HasExplicitLyrics() bool {
+	return a.ExplicitLyrics
+}
+
+func (t Track) GetReleaseDate() string {
+	return t.ReleaseDate
+}
+
+func (a Album) GetReleaseDate() string {
+	return a.ReleaseDate
+}
+
+func (t Track) GetDuration() int {
+	return t.Duration
+}
+
+func (a Album) GetDuration() int {
+	return a.Duration
+}
+
+func (p Playlist) GetDuration() int {
+	return p.Duration
+}
+
+func explicitMarker(media Media) string {
+	if media.HasExplicitLyrics() {
+		return " [E]"
+	}
+	return ""
+}
+
+func parseReleaseDate(media Media) (time.Time, error) {
+	const dateFormat = "2006-01-02"
+	releaseDate, err := time.Parse(dateFormat, media.GetReleaseDate())
+	if err != nil {
+		return time.Time{}, err
+	}
+	return releaseDate, nil
+}
+
+func formatDuration(media Media) string {
+	d := time.Duration(media.GetDuration()) * time.Second
+	return fmt.Sprintf("%02d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+
+}
+
+func formatTrackSearchResult(track Track) string {
+	artists := getArtists(track)
+	duration := formatDuration(track)
+	return fmt.Sprintf(
+		"%d\t%s - %s (%s)%s",
+		track.ID,
+		artists,
+		track.Title,
+		duration,
+		explicitMarker(track),
+	)
+}
+
+func formatAlbumSearchResult(album Album, releaseDate string) string {
+	var date string
+
+	if releaseDate != "" {
+		date = fmt.Sprintf(" (%s)", releaseDate)
+	}
+
+	return fmt.Sprintf(
+		"%d\t%s - %s%s%s",
+		album.ID,
+		album.Artist.Name,
+		album.Title,
+		date,
+		explicitMarker(album),
+	)
+}
+
+func formatPlaylistSearchResult(playlist Playlist, creationDate string) string {
+	var date string
+	if creationDate != "" {
+		date = fmt.Sprintf("%s", creationDate)
+	}
+
+	return fmt.Sprintf(
+		"%d\t%s (created by: %s, %s) (tracks: %d)",
+		playlist.ID,
+		playlist.Title,
+		playlist.User.Name,
+		date,
+		playlist.NbTracks,
+	)
+}
+
+func runSearchTrack(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("search track", flag.ContinueOnError)
+	limit := fs.Int("limit", 25, "maximum number of results")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape search track [flags] <query>")
+		fs.PrintDefaults()
+	}
+
+	query, err := parseSearchQuery(fs, args, "track")
+	if err != nil {
+		return err
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+
+	tracks, err := client.SearchTrack(ctx, query, *limit)
+	if err != nil {
+		return err
+	}
+
+	for _, track := range tracks {
+		fmt.Println(formatTrackSearchResult(track))
+	}
+	return nil
+}
+
+func runSearchAlbum(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("search album", flag.ContinueOnError)
+	limit := fs.Int("limit", 25, "maximum number of results")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape search album [flags] <query>")
+		fs.PrintDefaults()
+	}
+
+	query, err := parseSearchQuery(fs, args, "album")
+	if err != nil {
+		return err
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+
+	albums, err := client.SearchAlbum(ctx, query, *limit)
+	if err != nil {
+		return err
+	}
+
+	dates := make(map[int]string)
+	for _, album := range albums {
+		date := dates[album.ID]
+		if date == ""{
+			album, err := client.GetAlbum(ctx, album.ID)
+			if err == nil {
+				date = album.ReleaseDate
+				dates[album.ID] = date
+			}
+		}
+
+		fmt.Println(formatAlbumSearchResult(album, date))
+	}
+	return nil
+}
+
+func runSearchPlaylist(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("search playlist", flag.ContinueOnError)
+	limit := fs.Int("limit", 25, "maximum number of results")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape search playlist [flags] <query>")
+		fs.PrintDefaults()
+	}
+
+	query, err := parseSearchQuery(fs, args, "playlist")
+	if err != nil {
+		return err
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+
+	playlists, err := client.SearchPlaylist(ctx, query, *limit)
+	if err != nil {
+		return err
+	}
+
+	for _, playlist := range playlists {
+
+		fmt.Println(formatPlaylistSearchResult(playlist, playlist.CreationDate))
+	}
+
+	return nil
+}
+
+func formatTrackShowResult(track Track) string {
+	genre := "unknown"
+	if len(track.Album.Genres.Data) > 0 {
+		genre = track.Album.Genres.Data[0].Name
+	}
+
+	return fmt.Sprintf(
+`Title: %s
+Artist: %s
+Contributors: %s
+Album: %s
+Duration: %s
+Release date: %s
+Genre: %s
+BPM: %f
+Rank: %d
+Explicit lyrics: %t
+Label: %s
+Cover (small): %s,
+Cover (medium): %s,
+Cover (big): %s,
+Cover (XL): %s,
+`,
+	track.Title,
+	track.Artist.Name,
+	getArtists(track),
+	track.Album.Title,
+	formatDuration(track),
+	track.ReleaseDate,
+	genre,
+	track.BPM,
+	track.Rank,
+	track.ExplicitLyrics,
+	track.Album.Label,
+	track.Album.CoverSmall,
+	track.Album.CoverMedium,
+	track.Album.CoverBig,
+	track.Album.CoverXL,
+	)
+}
+
+func formatAlbumTracklist(tracks []Track) string {
+	multiDisc := hasMultipleDiscs(tracks)
+
+	var b strings.Builder
+
+	for _, track := range tracks {
+		if label := albumTrackLabel(track, multiDisc); label != "" {
+			b.WriteString(label)
+			b.WriteByte(' ')
+		}
+
+		b.WriteString(getArtists(track))
+		b.WriteString(" - ")
+		b.WriteString(track.Title)
+
+		if track.Duration > 0 {
+			b.WriteString(" (")
+			b.WriteString(formatDuration(track))
+			b.WriteByte(')')
+		}
+
+		b.WriteString(explicitMarker(track))
+		b.WriteByte('\n')
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+func formatAlbumShowResult(client *Client, ctx context.Context, album Album) string {
+	genre := "unknown"
+	if len(album.Genres.Data) > 0 {
+		genre = album.Genres.Data[0].Name
+	}
+
+	var tracks []Track
+	var tracklist string
+	next := fmt.Sprintf("/album/%d/tracks", album.ID)
+	for next != "" {
+		var page Page[Track]
+
+	if err := client.getJSON(ctx, client.apiBaseURL, next, &page); err != nil {
+		tracklist = "could not fetch"
+	}
+
+	tracks = append(tracks, page.Data...)
+	next = page.Next
+	}
+	tracklist = formatAlbumTracklist(tracks)
+	return fmt.Sprintf(
+`Title: %s
+Artist: %s
+Duration: %s
+Release date: %s
+Genre: %s
+Tracks: %d
+Explicit lyrics: %t
+Label: %s
+Tracklist:
+%s
+Cover (small): %s,
+Cover (medium): %s,
+Cover (big): %s,
+Cover (XL): %s,
+`,
+	album.Title,
+	album.Artist.Name,
+	formatDuration(album),
+	album.ReleaseDate,
+	genre,
+	album.NbTracks,
+	album.ExplicitLyrics,
+	album.Label,
+	tracklist,
+	album.CoverSmall,
+	album.CoverMedium,
+	album.CoverBig,
+	album.CoverXL,
+	)
+}
+
+func formatPlaylistShowResult(playlist Playlist) string {
+	return fmt.Sprintf(
+`Title: %s
+Creator: %s
+Duration: %s
+Creation date: %s
+`,
+	playlist.Title,
+	playlist.Creator.Name,
+	formatDuration(playlist),
+	playlist.CreationDate,
+	)
+}
+
+func runShow(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("show: expected track, album, playlist, or artist")
+	}
+
+	switch args[0] {
+	case "track":
+		return runShowTrack(ctx, args[1:])
+	case "album":
+		return runShowAlbum(ctx, args[1:])
+	//case "playlist":
+	//	return runShowPlaylist(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown show option %q", args[0])
+	}
+}
+
+func runShowTrack(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("show track", flag.ContinueOnError)
+	id, err := parseSingleID(fs, args, "track")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape show track <track-id>")
+	}
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	track, err := client.GetTrack(ctx, id)
+	if err != nil {
+		return err
+	}
+	fmt.Println(formatTrackShowResult(track))
+	return nil
+}
+
+func runShowAlbum(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("show album", flag.ContinueOnError)
+	id, err := parseSingleID(fs, args, "album")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape show album <album-id>")
+	}
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	album, err := client.GetAlbum(ctx, id)
+	if err != nil {
+		return err
+	}
+	fmt.Println(formatAlbumShowResult(client, ctx, album))
+	return nil
+}
+
+func runShowPlaylist(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("show playlist", flag.ContinueOnError)
+	id, err := parseSingleID(fs, args, "playlist")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage: dzscrape show playlist <playlist-id>")
+	}
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+	playlist, err := client.GetPlaylist(ctx, id)
+	if err != nil {
+		return err
+	}
+	fmt.Println(formatPlaylistShowResult(client, ctx, playlist))
 	return nil
 }
 
@@ -1312,15 +1836,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error: ", err)
 		os.Exit(1)
 	}
-
-	//albumID := 6651488
-	//songID := 67929161 // track with a single artsit
-	//songID := 67929169 // track with multiple artists
-	//songID :=	"-3040362302" // track that was imported locally
-	//_, err = downloader.DownloadTrack(ctx, songID)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//downloader.DownloadTrack(ctx, songID)
-
 }
