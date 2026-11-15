@@ -19,7 +19,7 @@
 ## Installation
 ```
 # clone repo, build a program and make it executable
-git clone https://github.com/krypxn36/dzscrape.git
+git clone https://github.com/kryptxn36/dzscrape.git
 cd dzscrape
 go build
 chmod +x dzscrape
