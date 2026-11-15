@@ -13,14 +13,13 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strconv"
 	_ "strconv"
 	"strings"
@@ -34,108 +33,67 @@ import (
 )
 
 type Playlist struct {
-	ID            int     `json:"id"`
-	Title         string  `json:"title"`
-	Description   string  `json:"description"`
-	Duration      int     `json:"duration"`
-	Public        bool    `json:"public"`
-	IsLovedTrack  bool    `json:"is_loved_track"`
-	Collaborative bool    `json:"collaborative"`
-	NbTracks      int     `json:"nb_tracks"`
-	Fans          int     `json:"fans"`
-	Link          string  `json:"link"`
-	Share         string  `json:"share"`
-	Picture       string  `json:"picture"`
-	PictureSmall  string  `json:"picture_small"`
-	PictureMedium string  `json:"picture_medium"`
-	PictureBig    string  `json:"picture_big"`
-	PictureXL     string  `json:"picture_xl"`
-	Checksum      string  `json:"checksum"`
-	Tracklist     string  `json:"tracklist"`
-	CreationDate  string  `json:"creation_date"`
-	AddDate       string  `json:"add_date"`
-	ModDate       string  `json:"mod_date"`
-	MD5Image      string  `json:"md5_image"`
-	PictureType   string  `json:"picture_type"`
-	ReleaseDate   string
-	ExplicitLyrics	bool
-	Creator       struct {
+	ID             int    `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Duration       int    `json:"duration"`
+	Public         bool   `json:"public"`
+	IsLovedTrack   bool   `json:"is_loved_track"`
+	Collaborative  bool   `json:"collaborative"`
+	NbTracks       int    `json:"nb_tracks"`
+	Fans           int    `json:"fans"`
+	Link           string `json:"link"`
+	Share          string `json:"share"`
+	Picture        string `json:"picture"`
+	PictureSmall   string `json:"picture_small"`
+	PictureMedium  string `json:"picture_medium"`
+	PictureBig     string `json:"picture_big"`
+	PictureXL      string `json:"picture_xl"`
+	Checksum       string `json:"checksum"`
+	Tracklist      string `json:"tracklist"`
+	CreationDate   string `json:"creation_date"`
+	AddDate        string `json:"add_date"`
+	ModDate        string `json:"mod_date"`
+	MD5Image       string `json:"md5_image"`
+	PictureType    string `json:"picture_type"`
+	ReleaseDate    string
+	ExplicitLyrics bool
+	Creator        struct {
 		ID        int    `json:"id"`
 		Name      string `json:"name"`
 		Tracklist string `json:"tracklist"`
 		Type      string `json:"type"`
 	} `json:"creator"`
-	User       	struct {
+	User struct {
 		ID        int    `json:"id"`
 		Name      string `json:"name"`
 		Tracklist string `json:"tracklist"`
 		Type      string `json:"type"`
 	} `json:"user"`
-	Tracks        struct {
+	Tracks struct {
 		Data []Track `json:"data"`
 	} `json:"tracks"`
 }
 
-type PlaylistData struct {
-	ID                    int    `json:"id"`
-	Readable              bool   `json:"readable"`
-	Title                 string `json:"title"`
-	TitleShort            string `json:"title_short"`
-	TitleVersion          string `json:"title_version"`
-	ISRC                  string `json:"isrc"`
-	Link                  string `json:"link"`
-	Duration              int    `json:"duration"`
-	Rank                  int    `json:"rank"`
-	ExplicitLyrics        bool   `json:"explicit_lyrics"`
-	ExplicitContentLyrics int    `json:"explicit_content_lyrics"`
-	ExplicitContentCover  int    `json:"explicit_content_cover"`
-	Preview               string `json:"preview"`
-	MD5Image              string `json:"md5_image"`
-	TimeAdd               int    `json:"time_add"`
-
-	Artist struct {
-		ID        int    `json:"id"`
-		Name      string `json:"name"`
-		Link      string `json:"link"`
-		Tracklist string `json:"tracklist"`
-		Type      string `json:"type"`
-	}
-
-	Album Album  `json:"album"`
-	Type  string `json:"type"`
-}
-
-type FetchedDataPlaylist struct {
-	PlaylistName string
-	Tracks       []string
-}
-
-type Albums struct {
-	Data     []Album `json:"data"`
-	Checksum string  `json:"checksum"`
-	Total    int     `json:"total"`
-	Next     string  `json:"next"`
-}
-
 type Album struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Link        string `json:"link"`
-	Upc         string `json:"upc"`
-	NbTracks	int		`json:"nb_tracks"`
-	Cover       string `json:"cover"`
-	CoverSmall  string `json:"cover_small"`
-	CoverMedium string `json:"cover_medium"`
-	CoverBig    string `json:"cover_big"`
-	CoverXL     string `json:"cover_xl"`
-	MD5Image    string `json:"md5_image"`
-	ReleaseDate           string        `json:"release_date"`
-	ExplicitLyrics        bool   `json:"explicit_lyrics"`
-	Genres      struct {
+	ID             int    `json:"id"`
+	Title          string `json:"title"`
+	Link           string `json:"link"`
+	Upc            string `json:"upc"`
+	NbTracks       int    `json:"nb_tracks"`
+	Cover          string `json:"cover"`
+	CoverSmall     string `json:"cover_small"`
+	CoverMedium    string `json:"cover_medium"`
+	CoverBig       string `json:"cover_big"`
+	CoverXL        string `json:"cover_xl"`
+	MD5Image       string `json:"md5_image"`
+	ReleaseDate    string `json:"release_date"`
+	ExplicitLyrics bool   `json:"explicit_lyrics"`
+	Genres         struct {
 		Data []GenreData `json:"data"`
 	} `json:"genres"`
 	Label     string `json:"label"`
-	Duration     int `json:"duration"`
+	Duration  int    `json:"duration"`
 	Tracklist string `json:"tracklist"`
 	Type      string `json:"type"`
 	Tracks    struct {
@@ -194,11 +152,9 @@ type User struct {
 }
 
 type DeezerError struct {
-	Err struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-		Code    int    `json:"code"`
-	}
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Code    int    `json:"code"`
 }
 
 type Track struct {
@@ -256,6 +212,25 @@ type GatewayResponse struct {
 	}
 }
 
+type Page[T any] struct {
+	Data  []T    `json:"data"`
+	Total int    `json:"total"`
+	Next  string `json:"next"`
+}
+
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s: %s", e.Status, e.Message)
+	}
+	return e.Status
+}
+
 var client Client
 
 type Client struct {
@@ -286,20 +261,31 @@ func joinURL(baseURL, path string) string {
 	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(path, "/")
 }
 
-var softErrors = []int{
-		http.StatusInternalServerError,
-		http.StatusNotImplemented,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout,
-		http.StatusHTTPVersionNotSupported,
-		http.StatusVariantAlsoNegotiates,
-		http.StatusInsufficientStorage,
-		http.StatusLoopDetected,
-		http.StatusNotExtended,
-		http.StatusNetworkAuthenticationRequired,
+func errorFromResponse(resp *http.Response) *HTTPError {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	if err != nil {
+		return &HTTPError{StatusCode: resp.StatusCode, Status: resp.Status}
 	}
-
+	var multi struct {
+		Errors []DeezerError `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &multi); err == nil && len(multi.Errors) > 0 {
+		return &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Message:    multi.Errors[0].Message}
+	}
+	var single struct {
+		Error DeezerError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &single); err == nil && single.Error.Message != "" {
+		return &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Message:    single.Error.Message}
+	}
+	return &HTTPError{StatusCode: resp.StatusCode, Status: resp.Status}
+}
 
 func (c *Client) getJSON(ctx context.Context, baseURL, path string, v any) error {
 
@@ -308,7 +294,6 @@ func (c *Client) getJSON(ctx context.Context, baseURL, path string, v any) error
 	if err != nil {
 		return err
 	}
-
 
 	if c.arl != "" {
 		req.AddCookie(&http.Cookie{Name: "arl", Value: c.arl})
@@ -324,22 +309,15 @@ func (c *Client) getJSON(ctx context.Context, baseURL, path string, v any) error
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		switch {
-		case response.StatusCode == http.StatusUnauthorized ||
-			response.StatusCode == http.StatusForbidden:
-			return fatal(fmt.Errorf("GET %s: %s", u, response.Status))
+		httpErr := errorFromResponse(response)
 
-		case response.StatusCode == http.StatusNotFound:
-			return fmt.Errorf("GET %s: %s", u, response.Status)
-
-		case slices.Contains(softErrors, response.StatusCode):
-			return fmt.Errorf("GET %s: %s", u, response.Status)
-
-		default:
-			return fmt.Errorf("GET %s: %s", u, response.Status)
+		if response.StatusCode == http.StatusUnauthorized ||
+			response.StatusCode == http.StatusForbidden {
+			return fatal(httpErr)
 		}
-	}
 
+		return httpErr
+	}
 	if err := json.NewDecoder(response.Body).Decode(v); err != nil {
 		return fmt.Errorf("decode %s: %w", u, err)
 	}
@@ -386,49 +364,6 @@ func (c *Client) GetPlaylist(ctx context.Context, id int) (Playlist, error) {
 	}
 
 	return playlist, nil
-}
-
-func (c *Client) fetchPlaylist(ctx context.Context, id int) (FetchedDataPlaylist, error) {
-	playlist, err := c.GetPlaylist(ctx, id)
-	if err != nil {
-		return FetchedDataPlaylist{}, err
-	}
-
-	var tracks []string
-
-	for _, track := range playlist.Tracks.Data {
-		tracks = append(tracks, fmt.Sprintf("%s - %s", track.Artist.Name, track.Title))
-	}
-
-	var data FetchedDataPlaylist
-	data.PlaylistName = playlist.Title
-	data.Tracks = tracks
-	return data, nil
-}
-
-func createPlaylistFile(data FetchedDataPlaylist) error {
-	re := regexp.MustCompile(`\s`)
-	fileName := strings.ToLower(re.ReplaceAllString(data.PlaylistName, "_"))
-	fileName = strings.ReplaceAll(fileName, "/", "_")
-
-	musicListFile, err := os.Create(fileName + ".m3u")
-	if err != nil {
-		return err
-	}
-
-	musicList := data.Tracks
-	for _, track := range musicList {
-		musicListFile.WriteString(track + "\n")
-	}
-
-	fmt.Printf("Tracklist has been written in %s.txt", fileName)
-	return nil
-}
-
-type Page[T any] struct {
-	Data  []T    `json:"data"`
-	Total int    `json:"total"`
-	Next  string `json:"next"`
 }
 
 func (c *Client) fetchAlbums(ctx context.Context, uid int) ([]Album, error) {
@@ -554,32 +489,41 @@ func (c *Client) getLicenseToken(ctx context.Context, arl string) (string, error
 	return licenseToken, nil
 }
 
-func (c *Client) getTrackToken(arl string, trackID int) (string, error) {
-	apiEndpoint := fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
-	req, err := http.NewRequest("GET", apiEndpoint, http.NoBody)
-	if err != nil {
-		return "", nil
+type Quality string
+
+const (
+	QualityLow      Quality = "low"      // MP3_128
+	QualityMedium   Quality = "medium"   // MP3_256
+	QualityHigh     Quality = "high"     // MP3_320
+	QualityLossless Quality = "lossless" // FLAC
+)
+
+func ParseQuality(s string) (Quality, error) {
+	q := Quality(strings.ToLower(strings.TrimSpace(s)))
+	switch q {
+	case QualityLow, QualityMedium, QualityHigh, QualityLossless:
+		return q, nil
+	default:
+		return "", fmt.Errorf("Invalid quality %q (use low, medium, high or lossless)", s)
 	}
-
-	req.Header.Set("Cookie", "arl="+arl+"; comeback=1")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", nil
-	}
-
-	defer resp.Body.Close()
-
-	var result Track
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
-		return "", err
-	}
-
-	trackToken := result.TrackToken
-	return trackToken, nil
 }
 
-func createMediaPayload(licenseToken, trackToken string) ([]byte, error) {
+func (q Quality) DeezerFormat() (string, error) {
+	switch q {
+	case QualityLow:
+		return "MP3_128", nil
+	case QualityMedium:
+		return "MP3_256", nil
+	case QualityHigh:
+		return "MP3_320", nil
+	case QualityLossless:
+		return "FLAC", nil
+	default:
+		return "", fmt.Errorf("unknown quality %q", q)
+	}
+}
+
+func createMediaPayload(licenseToken, trackToken string, format string) ([]byte, error) {
 	type formats struct {
 		Cipher string `json:"cipher"`
 		Format string `json:"format"`
@@ -601,7 +545,7 @@ func createMediaPayload(licenseToken, trackToken string) ([]byte, error) {
 			{
 				Type: "FULL",
 				Formats: []formats{
-					{Cipher: "BF_CBC_STRIPE", Format: "MP3_128"},
+					{Cipher: "BF_CBC_STRIPE", Format: format},
 				},
 			},
 		},
@@ -614,82 +558,100 @@ func createMediaPayload(licenseToken, trackToken string) ([]byte, error) {
 	return result, nil
 }
 
-func (c *Client) getTrackURL(licenseToken, trackToken string) (string, error) {
-	type media struct {
-		MediaType string `json:"media_type"`
-		Cipher    struct {
-			Type string `json:"type"`
-		} `json:"cipher"`
-		Format  string `json:"format"`
-		Sources []struct {
-			URL string `json:"url"`
-		} `json:"sources"`
-	}
+type MediaSource struct {
+	URL    string
+	Format string
+	Cipher string
+}
 
-	type data struct {
-		Media []media `json:"media"`
-	}
+type media struct {
+	MediaType string `json:"media_type"`
+	Cipher    struct {
+		Type string `json:"type"`
+	} `json:"cipher"`
+	Format  string `json:"format"`
+	Sources []struct {
+		URL string `json:"url"`
+	} `json:"sources"`
+}
 
-	type getURLResponse struct {
-		Data []data `json:"data"`
-		Errors []DeezerError `json:"errors"`
-	}
+type data struct {
+	Media []media `json:"media"`
+}
 
-	firstMediaURL := func(resp getURLResponse) (string, error) {
-		for _, dataItem := range resp.Data {
-			if len(dataItem.Media) == 0 {
-				continue
-			}
-			for _, mediaItem := range dataItem.Media {
-				if len(mediaItem.Sources) == 0 {
-					continue
-				}
-				for _, source := range mediaItem.Sources {
-					if len(source.URL) == 0 {
-						continue
-					}
-					url := source.URL
-					return url, nil
+type DeezerErrorResponse struct {
+	Error DeezerError `json:"error"`
+}
+type getURLResponse struct {
+	Data   []data        `json:"data"`
+	Errors []DeezerError `json:"errors"`
+}
+
+func firstMediaSource(resp getURLResponse) (MediaSource, error) {
+	for _, d := range resp.Data {
+		if len(d.Media) == 0 {
+			continue
+		}
+		for _, m := range d.Media {
+			for _, source := range m.Sources {
+				if source.URL != "" {
+					return MediaSource{
+						URL:    source.URL,
+						Format: m.Format,
+						Cipher: m.Cipher.Type,
+					}, nil
 				}
 			}
 		}
 		if len(resp.Errors) > 0 {
-			e:= resp.Errors[0]
-			return "", fmt.Errorf("get_url: %s (code %d)", e.Err.Message, e.Err.Code)
+			e := resp.Errors[0]
+			return MediaSource{}, fmt.Errorf("get_url: %s (code %d)", e.Message, e.Code)
 		}
-
-		return "", errors.New("get_url: no media sources")
-	}
-	
-
-	payload, err := createMediaPayload(licenseToken, trackToken)
-	if err != nil {
-		return "", err
 	}
 
-	req, err := http.NewRequest("POST", joinURL(c.mediaBaseURL, "/v1/get_url"), bytes.NewBuffer(payload))
+	return MediaSource{}, errors.New("get_url: no media sources")
+}
+
+func (c *Client) getTrackURL(ctx context.Context, licenseToken, trackToken string, quality Quality) (MediaSource, error) {
+	format, err := quality.DeezerFormat()
 	if err != nil {
-		return "", err
+		return MediaSource{}, err
+	}
+
+	payload, err := createMediaPayload(licenseToken, trackToken, format)
+	if err != nil {
+		return MediaSource{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(c.mediaBaseURL, "/v1/get_url"), bytes.NewReader(payload))
+	if err != nil {
+		return MediaSource{}, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return MediaSource{}, err
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return "", fmt.Errorf("get_url: %s: %s", resp.Status, body)
+		httpErr := errorFromResponse(resp)
+
+		if resp.StatusCode == http.StatusUnauthorized ||
+			resp.StatusCode == http.StatusForbidden {
+			return MediaSource{}, fatal(httpErr)
+		}
+
+		return MediaSource{}, httpErr
 	}
 
 	var result getURLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return MediaSource{}, err
 	}
-	return firstMediaURL(result)
+	return firstMediaSource(result)
 
 }
 
@@ -730,12 +692,12 @@ func getArtists(track Track) string {
 
 	for i, contributor := range track.Contributors {
 		artistsBuilder.WriteString(contributor.Name)
-		if i < len(track.Contributors) - 1 {
+		if i < len(track.Contributors)-1 {
 			artistsBuilder.WriteString(", ")
 		}
 	}
-	artists := artistsBuilder.String()
-	return artists
+
+	return artistsBuilder.String()
 }
 func formatTrackName(track Track) string {
 	artists := getArtists(track)
@@ -770,6 +732,10 @@ func (d *Downloader) fetchAndDecrypt(
 	}
 
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return errorFromResponse(resp)
+	}
 
 	trackID := fmt.Sprintf("%d", trackInfo.ID)
 	key := calcBlowfishKey(trackID)
@@ -832,7 +798,6 @@ func (d *Downloader) GetCover(ctx context.Context, albumID int) ([]byte, error) 
 
 }
 
-
 func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) error {
 
 	artists := make([]string, 0, len(track.Contributors))
@@ -841,6 +806,9 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 	}
 
 	album, err := d.getAlbum(ctx, track.Album.ID)
+	if err != nil {
+		return err
+	}
 
 	genre := ""
 	if len(album.Genres.Data) > 0 {
@@ -849,6 +817,14 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 
 	releaseDate, err := parseReleaseDate(track)
 
+	var releaseYear string
+
+	if err != nil {
+		releaseYear = "N/A"
+	} else {
+		releaseYear = fmt.Sprintf("%d", releaseDate.Year())
+	}
+
 	tags := map[string][]string{
 		taglib.Artist:      artists,
 		taglib.Title:       {track.Title},
@@ -856,11 +832,11 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 		taglib.AlbumArtist: {track.Album.Artist.Name},
 		taglib.TrackNumber: {fmt.Sprintf("%d", track.TrackPosition)},
 		taglib.ISRC:        {track.ISRC},
-		taglib.BPM:         {fmt.Sprintf("%f", track.BPM)},
+		taglib.BPM:         {fmt.Sprintf("%.2f", track.BPM)},
 		taglib.Genre:       {genre},
 		taglib.Label:       {album.Label},
-		"Year":             {fmt.Sprintf("%d", releaseDate.Year())},
-		"Gain":             {fmt.Sprintf("%f", track.Gain)},
+		"Year":             {releaseYear},
+		"Gain":             {fmt.Sprintf("%.3f", track.Gain)},
 	}
 
 	cover, err := d.GetCover(ctx, album.ID)
@@ -896,7 +872,7 @@ func (d *Downloader) getAlbum(ctx context.Context, id int) (Album, error) {
 
 	album, err := d.client.GetAlbum(ctx, id)
 	if err != nil {
-		return Album{}, nil
+		return Album{}, err
 	}
 
 	d.mu.Lock()
@@ -911,8 +887,96 @@ type Downloader struct {
 	outDir       string
 	licenseToken string
 	force        bool
+	quality      Quality
 	mu           sync.Mutex
 	albumCache   map[int]Album
+}
+
+func extensionForFormat(format string) string {
+	switch strings.ToUpper(format) {
+	case "FLAC":
+		return ".flac"
+	default:
+		return ".mp3"
+	}
+}
+
+func isRetryable(err error) bool {
+	if err == nil || isFatal(err) {
+		return false
+	}
+
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
+		switch httpErr.StatusCode {
+		case http.StatusRequestTimeout,
+			http.StatusTooManyRequests,
+			http.StatusInternalServerError,
+			http.StatusBadGateway,
+			http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout:
+			return true
+
+		case http.StatusForbidden:
+			return true
+
+		default:
+			return false
+		}
+	}
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	if _, ok := errors.AsType[net.Error](err); ok {
+		return true
+	}
+
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func retry(
+	ctx context.Context,
+	attempts int,
+	baseDelay time.Duration,
+	fn func() error,
+) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !isRetryable(lastErr) {
+			break
+		}
+		delay := baseDelay << (attempt - 1)
+		delay = min(delay, 10*time.Second)
+		log.Printf(
+			"attempt %d/%d failed: %v; retrying in %s",
+			attempt, attempts, lastErr, delay,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("after %d attempts: %w", attempts, lastErr)
 }
 
 func (d *Downloader) DownloadTrack(
@@ -922,7 +986,26 @@ func (d *Downloader) DownloadTrack(
 	return d.downloadTrack(ctx, trackID, formatTrackName)
 }
 
-func (d *Downloader) downloadTrack(ctx context.Context,
+func (d *Downloader) downloadTrack(
+	ctx context.Context,
+	trackID int,
+	filename FilenameFunc,
+) (string, error) {
+	var path string
+
+	err := retry(ctx, 3, 500*time.Millisecond, func() error {
+		p, err := d.downloadTrackOnce(ctx, trackID, filename)
+		if err != nil {
+			return err
+		}
+		path = p
+		return nil
+	})
+
+	return path, err
+}
+
+func (d *Downloader) downloadTrackOnce(ctx context.Context,
 	trackID int,
 	filename FilenameFunc,
 ) (string, error) {
@@ -935,23 +1018,45 @@ func (d *Downloader) downloadTrack(ctx context.Context,
 		return "", fmt.Errorf("Get track %d: %w", trackID, err)
 	}
 
+	if !track.Readable {
+		return "", fmt.Errorf(
+			"track %d \"%s - %s\" is not readable (unavailable in your region)",
+			track.ID, track.Artist.Name, track.Title,
+		)
+	}
+
+	if track.TrackToken == "" {
+		return "", fmt.Errorf("track %d \"%s - %s\" has no track token",
+			track.ID, track.Artist.Name, track.Title)
+	}
+
+	source, err := d.client.getTrackURL(
+		ctx,
+		d.licenseToken,
+		track.TrackToken,
+		d.quality,
+	)
+	if err != nil {
+		return "", fmt.Errorf("Failed to get URL for track with id %d: %w", trackID, err)
+	}
+
 	finalPath := filepath.Join(
 		d.outDir,
-		filename(track)+".mp3",
+		filename(track)+extensionForFormat(source.Format),
 	)
 
 	if _, err := os.Stat(finalPath); err == nil {
 		fmt.Printf("Skipping: '%s' - file exists\n", finalPath)
 		return "", nil
 	}
-	fmt.Printf("Downloading: '%s - %s'...\n", track.Artist.Name, track.Title)
 
-	trackToken := track.TrackToken
-
-	trackURL, err := d.client.getTrackURL(d.licenseToken, trackToken)
-	if err != nil {
-		return "", fmt.Errorf("Failed to get URL for track with id %d: %w", trackID, err)
+	if !d.force {
+		if info, err := os.Stat(finalPath); err == nil && info.Size() > 0 {
+			return finalPath, nil
+		}
 	}
+
+	fmt.Printf("Downloading: '%s - %s'...\n", track.Artist.Name, track.Title)
 
 	tmp, err := os.CreateTemp(d.outDir, ".part-*")
 	if err != nil {
@@ -964,7 +1069,7 @@ func (d *Downloader) downloadTrack(ctx context.Context,
 		_ = os.Remove(tmpPath)
 	}()
 
-	if err := d.fetchAndDecrypt(ctx, trackURL, track, tmp); err != nil {
+	if err := d.fetchAndDecrypt(ctx, source.URL, track, tmp); err != nil {
 		return "", fmt.Errorf("Failed to save track with id %d: %w", trackID, err)
 	}
 
@@ -1053,7 +1158,7 @@ func hasMultipleDiscs(tracks []Track) bool {
 		if track.DiskNumber > 1 {
 			return true
 		}
-}
+	}
 	return false
 }
 
@@ -1063,17 +1168,19 @@ func albumTrackLabel(track Track, multiDisc bool) string {
 		2: "B",
 		3: "C",
 		4: "D",
+		5: "E",
+		6: "F",
+		7: "G",
 	}
-		if multiDisc {
-			disc := track.DiskNumber
-			if disc <= 0 {
-				disc = 1
-			}
-			return fmt.Sprintf("%s%02d.", discs[disc], track.TrackPosition)
+	if multiDisc {
+		disc := track.DiskNumber
+		if disc <= 0 {
+			disc = 1
 		}
-		return fmt.Sprintf("%02d.", track.TrackPosition)
+		return fmt.Sprintf("%s%02d.", discs[disc], track.TrackPosition)
+	}
+	return fmt.Sprintf("%02d.", track.TrackPosition)
 }
-
 
 func albumFilenameFunc(tracks []Track) FilenameFunc {
 	multiDisc := hasMultipleDiscs(tracks)
@@ -1096,18 +1203,22 @@ func (d *Downloader) DownloadAlbum(ctx context.Context, id int) error {
 	for next != "" {
 		var page Page[Track]
 
-	if err := d.client.getJSON(ctx, d.client.apiBaseURL, next, &page); err != nil {
-		return err
-	}
+		if err := d.client.getJSON(ctx, d.client.apiBaseURL, next, &page); err != nil {
+			return err
+		}
 
-	tracks = append(tracks, page.Data...)
-	next = page.Next
+		tracks = append(tracks, page.Data...)
+		next = page.Next
 	}
 
 	return d.downloadAll(ctx, tracks, albumFilenameFunc(tracks))
 }
 
-func InitDownloader(ctx context.Context, c *Client, outDir string, force bool) (*Downloader, error) {
+func InitDownloader(ctx context.Context,
+	c *Client,
+	outDir string,
+	force bool,
+	quality Quality) (*Downloader, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("Failed to create directory: %w", err)
 	}
@@ -1126,6 +1237,7 @@ func InitDownloader(ctx context.Context, c *Client, outDir string, force bool) (
 		outDir:       outDir,
 		licenseToken: licenseToken,
 		force:        force,
+		quality:      quality,
 		albumCache:   make(map[int]Album),
 	}, nil
 
@@ -1147,8 +1259,9 @@ func printUsage() {
 	  %[1]s help
 
 	Flags for download commands:
-	  -out string    output directory
-	  -force         overwrite existing files
+	  -out: output directory
+	  -quality: choose audio quality
+	  -force: overwrite existing files
 	  `, name)
 }
 
@@ -1177,7 +1290,7 @@ func runDownload(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("download: expected track, album, playlist or favorites")
 	}
-	
+
 	switch args[0] {
 	case "track":
 		return runDownloadTrack(ctx, args[1:])
@@ -1196,7 +1309,7 @@ func parseSingleID(fs *flag.FlagSet, args []string, kind string) (int, error) {
 	if err := fs.Parse(args); err != nil {
 		return 0, err
 	}
-	
+
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return 0, fmt.Errorf("%s: expected exactly one ID", kind)
@@ -1220,6 +1333,7 @@ func defaultDir(value, fallback string) string {
 func addDownloadFlags(fs *flag.FlagSet, opts *downloadOptions) {
 	fs.StringVar(&opts.outDir, "out", "", "output directory")
 	fs.BoolVar(&opts.force, "force", false, "overwrite existing files")
+	fs.StringVar(&opts.quality, "quality", "low", "audio quality: low, medium, high or lossless")
 }
 
 func runDownloadTrack(ctx context.Context, args []string) error {
@@ -1232,8 +1346,13 @@ func runDownloadTrack(ctx context.Context, args []string) error {
 		return err
 	}
 
+	quality, err := ParseQuality(opts.quality)
+	if err != nil {
+		return err
+	}
+
 	client := InitClient(os.Getenv("DEEZER_ARL"))
-	downloader, err := InitDownloader(ctx, client, defaultDir(opts.outDir, "downloads"), opts.force)
+	downloader, err := InitDownloader(ctx, client, defaultDir(opts.outDir, "downloads"), opts.force, quality)
 
 	if err != nil {
 		return err
@@ -1242,7 +1361,9 @@ func runDownloadTrack(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Saved: %s", path)
+	if path != "" {
+		fmt.Printf("Saved: %s", path)
+	}
 
 	return nil
 }
@@ -1257,6 +1378,11 @@ func runDownloadAlbum(ctx context.Context, args []string) error {
 		return err
 	}
 
+	quality, err := ParseQuality(opts.quality)
+	if err != nil {
+		return err
+	}
+
 	client := InitClient(os.Getenv("DEEZER_ARL"))
 	album, err := client.GetAlbum(ctx, id)
 
@@ -1266,9 +1392,9 @@ func runDownloadAlbum(ctx context.Context, args []string) error {
 	dir := opts.outDir
 	if dir == "" {
 		dir = filepath.Join("downloads", "albums",
-		sanitizeFilename(album.Artist.Name + " - " + album.Title))
+			sanitizeFilename(album.Artist.Name+" - "+album.Title))
 	}
-	downloader, err := InitDownloader(ctx, client, dir, opts.force)
+	downloader, err := InitDownloader(ctx, client, dir, opts.force, quality)
 	if err != nil {
 		return err
 	}
@@ -1300,9 +1426,15 @@ func runDownloadPlaylist(ctx context.Context, args []string) error {
 	dir := opts.outDir
 	if dir == "" {
 		dir = filepath.Join("downloads", "playlists",
-		sanitizeFilename(playlist.Title))
+			sanitizeFilename(playlist.Title))
 	}
-	downloader, err := InitDownloader(ctx, client, dir, opts.force)
+
+	quality, err := ParseQuality(opts.quality)
+	if err != nil {
+		return err
+	}
+
+	downloader, err := InitDownloader(ctx, client, dir, opts.force, quality)
 	if err != nil {
 		return err
 	}
@@ -1332,7 +1464,12 @@ func runDownloadFavorites(ctx context.Context, args []string) error {
 		dir = filepath.Join("downloads", "favorites")
 	}
 
-	downloader, err := InitDownloader(ctx, client, dir, opts.force)
+	quality, err := ParseQuality(opts.quality)
+	if err != nil {
+		return err
+	}
+
+	downloader, err := InitDownloader(ctx, client, dir, opts.force, quality)
 	if err != nil {
 		return err
 	}
@@ -1345,10 +1482,10 @@ func runDownloadFavorites(ctx context.Context, args []string) error {
 	return nil
 }
 
-
 type downloadOptions struct {
-	outDir	string
-	force bool
+	outDir  string
+	force   bool
+	quality string
 }
 
 func search[T any](
@@ -1394,10 +1531,9 @@ func (c *Client) SearchArtist(ctx context.Context, query string, limit int) ([]A
 	return search[Artist](ctx, c, "artist", query, limit)
 }
 
-
 func runSearch(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("search: expected track, album, playlist, or artist")
+		return errors.New("search: expected track, album or playlist")
 	}
 
 	switch args[0] {
@@ -1426,7 +1562,7 @@ func parseSearchQuery(fs *flag.FlagSet, args []string, kind string) (string, err
 type Media interface {
 	HasExplicitLyrics() bool
 	GetReleaseDate() string
-	GetDuration()	int
+	GetDuration() int
 }
 
 func (t Track) HasExplicitLyrics() bool {
@@ -1444,7 +1580,6 @@ func (p Playlist) HasExplicitLyrics() bool {
 func (t Track) GetReleaseDate() string {
 	return t.ReleaseDate
 }
-
 
 func (a Album) GetReleaseDate() string {
 	return a.ReleaseDate
@@ -1484,7 +1619,19 @@ func parseReleaseDate(media Media) (time.Time, error) {
 
 func formatDuration(media Media) string {
 	d := time.Duration(media.GetDuration()) * time.Second
-	return fmt.Sprintf("%02d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+	if int(d.Hours()) > 0 {
+		return fmt.Sprintf(
+			"%02d:%02d:%02d",
+			int(d.Hours()),
+			int(d.Minutes())%60,
+			int(d.Seconds())%60,
+		)
+	}
+	return fmt.Sprintf(
+		"%02d:%02d",
+		int(d.Minutes()),
+		int(d.Seconds())%60,
+	)
 
 }
 
@@ -1583,7 +1730,7 @@ func runSearchAlbum(ctx context.Context, args []string) error {
 	dates := make(map[int]string)
 	for _, album := range albums {
 		date := dates[album.ID]
-		if date == ""{
+		if date == "" {
 			album, err := client.GetAlbum(ctx, album.ID)
 			if err == nil {
 				date = album.ReleaseDate
@@ -1624,10 +1771,10 @@ func runSearchPlaylist(ctx context.Context, args []string) error {
 	return nil
 }
 
-func formatTrackShowResult(track Track) string {
-	genre := "unknown"
-	if len(track.Album.Genres.Data) > 0 {
-		genre = track.Album.Genres.Data[0].Name
+func formatTrackShowResult(track Track, album Album) string {
+	genre := "N/A"
+	if len(album.Genres.Data) > 0 {
+		genre = album.Genres.Data[0].Name
 	}
 
 	return fmt.Sprintf(
@@ -1642,26 +1789,27 @@ BPM: %f
 Rank: %d
 Explicit lyrics: %t
 Label: %s
-Cover (small): %s
-Cover (medium): %s
-Cover (big): %s
-Cover (XL): %s
+Covers:
+Small: %s
+Medium: %s
+Big: %s
+XL: %s
 `,
-	track.Title,
-	track.Artist.Name,
-	getArtists(track),
-	track.Album.Title,
-	formatDuration(track),
-	track.ReleaseDate,
-	genre,
-	track.BPM,
-	track.Rank,
-	track.ExplicitLyrics,
-	track.Album.Label,
-	track.Album.CoverSmall,
-	track.Album.CoverMedium,
-	track.Album.CoverBig,
-	track.Album.CoverXL,
+		track.Title,
+		track.Artist.Name,
+		getArtists(track),
+		track.Album.Title,
+		formatDuration(track),
+		track.ReleaseDate,
+		genre,
+		track.BPM,
+		track.Rank,
+		track.ExplicitLyrics,
+		album.Label,
+		track.Album.CoverSmall,
+		track.Album.CoverMedium,
+		track.Album.CoverBig,
+		track.Album.CoverXL,
 	)
 }
 
@@ -1692,26 +1840,13 @@ func formatAlbumTracklist(tracks []Track) string {
 
 	return strings.TrimRight(b.String(), "\n")
 }
-func formatAlbumShowResult(client *Client, ctx context.Context, album Album) string {
-	genre := "unknown"
+func formatAlbumShowResult(album Album, tracks []Track) string {
+	genre := "N/A"
 	if len(album.Genres.Data) > 0 {
 		genre = album.Genres.Data[0].Name
 	}
 
-	var tracks []Track
-	var tracklist string
-	next := fmt.Sprintf("/album/%d/tracks", album.ID)
-	for next != "" {
-		var page Page[Track]
-
-	if err := client.getJSON(ctx, client.apiBaseURL, next, &page); err != nil {
-		tracklist = "could not fetch"
-	}
-
-	tracks = append(tracks, page.Data...)
-	next = page.Next
-	}
-	tracklist = formatAlbumTracklist(tracks)
+	tracklist := formatAlbumTracklist(tracks)
 	return fmt.Sprintf(
 `Title: %s
 Artist: %s
@@ -1723,34 +1858,38 @@ Explicit lyrics: %t
 Label: %s
 Tracklist:
 %s
-Cover (small): %s
-Cover (medium): %s
-Cover (big): %s
-Cover (XL): %s
+Covers:
+Small: %s
+Medium: %s
+Big: %s
+XL: %s
 `,
-	album.Title,
-	album.Artist.Name,
-	formatDuration(album),
-	album.ReleaseDate,
-	genre,
-	album.NbTracks,
-	album.ExplicitLyrics,
-	album.Label,
-	tracklist,
-	album.CoverSmall,
-	album.CoverMedium,
-	album.CoverBig,
-	album.CoverXL,
+		album.Title,
+		album.Artist.Name,
+		formatDuration(album),
+		album.ReleaseDate,
+		genre,
+		album.NbTracks,
+		album.ExplicitLyrics,
+		album.Label,
+		tracklist,
+		album.CoverSmall,
+		album.CoverMedium,
+		album.CoverBig,
+		album.CoverXL,
 	)
 }
 
 func formatPlaylistTracklist(playlist Playlist) string {
-	var tracklist string
+	var tracklistBuilder strings.Builder
+
 	for _, track := range playlist.Tracks.Data {
 		artists := getArtists(track)
-		tracklist += fmt.Sprintf("%s - %s\n", artists, track.Title)
+		trackFormatted := fmt.Sprintf("%s - %s\n", artists, track.Title)
+		tracklistBuilder.WriteString(trackFormatted)
 	}
-	return tracklist
+	return tracklistBuilder.String()
+
 }
 
 func formatPlaylistShowResult(playlist Playlist) string {
@@ -1762,17 +1901,17 @@ Creation date: %s
 Tracklist:
 %s
 `,
-	playlist.Title,
-	playlist.Creator.Name,
-	formatDuration(playlist),
-	playlist.CreationDate,
-	formatPlaylistTracklist(playlist),
+		playlist.Title,
+		playlist.Creator.Name,
+		formatDuration(playlist),
+		playlist.CreationDate,
+		formatPlaylistTracklist(playlist),
 	)
 }
 
 func runShow(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("show: expected track, album, playlist, or artist")
+		return errors.New("show: expected track, album, or playlist")
 	}
 
 	switch args[0] {
@@ -1790,6 +1929,9 @@ func runShow(ctx context.Context, args []string) error {
 func runShowTrack(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("show track", flag.ContinueOnError)
 	id, err := parseSingleID(fs, args, "track")
+	if err != nil {
+		return nil
+	}
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: dzscrape show track <track-id>")
 	}
@@ -1798,13 +1940,23 @@ func runShowTrack(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(formatTrackShowResult(track))
+
+	album, err := client.GetAlbum(ctx, track.Album.ID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(formatTrackShowResult(track, album))
+
 	return nil
 }
 
 func runShowAlbum(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("show album", flag.ContinueOnError)
 	id, err := parseSingleID(fs, args, "album")
+	if err != nil {
+		return nil
+	}
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: dzscrape show album <album-id>")
 	}
@@ -1813,13 +1965,29 @@ func runShowAlbum(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(formatAlbumShowResult(client, ctx, album))
+
+	var tracks []Track
+	next := fmt.Sprintf("/album/%d/tracks", album.ID)
+	for next != "" {
+		var page Page[Track]
+
+		if err := client.getJSON(ctx, client.apiBaseURL, next, &page); err != nil {
+			return err
+		}
+
+		tracks = append(tracks, page.Data...)
+		next = page.Next
+	}
+	fmt.Println(formatAlbumShowResult(album, tracks))
 	return nil
 }
 
 func runShowPlaylist(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("show playlist", flag.ContinueOnError)
 	id, err := parseSingleID(fs, args, "playlist")
+	if err != nil {
+		return err
+	}
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: dzscrape show playlist <playlist-id>")
 	}
