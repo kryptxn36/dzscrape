@@ -1045,14 +1045,12 @@ func (d *Downloader) downloadTrackOnce(ctx context.Context,
 		filename(track)+extensionForFormat(source.Format),
 	)
 
-	if _, err := os.Stat(finalPath); err == nil {
-		fmt.Printf("Skipping: '%s' - file exists\n", finalPath)
-		return "", nil
-	}
-
 	if !d.force {
-		if info, err := os.Stat(finalPath); err == nil && info.Size() > 0 {
-			return finalPath, nil
+	if info, err := os.Stat(finalPath); err == nil &&
+		info.Mode().IsRegular() &&
+		info.Size() > 0 {
+		fmt.Printf("Skipping: '%s' - file exists\n", finalPath)
+		return finalPath, nil
 		}
 	}
 
