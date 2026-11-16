@@ -43,10 +43,16 @@ dzscrape download album [flags] <album-id>
 dzscrape download playlist [flags] <playlist-id>
 dzscrape download favorites [flags] <user-id>
 
-# view info
+# view media info
 dzscrape show track <track-id>
 dzscrape show album <album-id>
 dzscrape show playlist <playlist-id>
+
+# view user info
+dzscrape show user <user-id>
+dzscrape show user <user-id> favorites
+dzscrape show user <user-id> albums
+dzscrape show user <user-id> playlists
 ```
 Flags for download commands:
 ```
