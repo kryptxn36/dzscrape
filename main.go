@@ -366,7 +366,7 @@ func (c *Client) GetPlaylist(ctx context.Context, id int) (Playlist, error) {
 	return playlist, nil
 }
 
-func (c *Client) fetchAlbums(ctx context.Context, uid int) ([]Album, error) {
+func (c *Client) GetUserAlbums(ctx context.Context, uid int) ([]Album, error) {
 	var albums []Album
 	next := fmt.Sprintf("/user/%d/albums", uid)
 
@@ -397,8 +397,25 @@ func (c *Client) GetUserTracks(ctx context.Context, uid int) ([]Track, error) {
 	return tracks, nil
 }
 
+func (c *Client) GetUserPlaylists(ctx context.Context, uid int) ([]Playlist, error) {
+	var playlists []Playlist
+	next := fmt.Sprintf("/user/%d/playlists", uid)
+
+	for next != "" {
+		var page Page[Playlist]
+		if err := c.getJSON(ctx, c.apiBaseURL, next, &page); err != nil {
+			return []Playlist{}, err
+		}
+		playlists = append(playlists, page.Data...)
+
+		next = page.Next
+	}
+	return playlists, nil
+}
+
 func calcBlowfishKey(trackID string) []byte {
-	secret := []byte("g4el58wc0zvf9na1")
+	secret, _ := hex.DecodeString("6734656c35387763307a7666396e6131")
+	secret = []byte(secret)
 	hash := md5.Sum([]byte(trackID))
 	hashHex := hex.EncodeToString(hash[:])
 
@@ -1243,24 +1260,24 @@ func InitDownloader(ctx context.Context,
 
 func printUsage() {
 	name := filepath.Base(os.Args[0])
-	fmt.Fprintf(os.Stderr, `Usage:
-	  %[1]s search track <query>
-	  %[1]s search album <query>
-	  %[1]s search playlist <query>
-	  %[1]s download track [flags] <track-id>
-	  %[1]s download album [flags] <album-id>
-	  %[1]s download playlist [flags] <playlist-id>
-	  %[1]s download favorites [flags] <user-id>
-	  %[1]s show track <track-id>
-	  %[1]s show album <album-id>
-	  %[1]s show playlist <playlist-id>
-	  %[1]s help
+	fmt.Fprintf(os.Stderr, 
+`Usage:
+	%[1]s search track <query>
+	%[1]s search album <query>
+	%[1]s search playlist <query>
+	%[1]s download track [flags] <track-id>
+	%[1]s download album [flags] <album-id>
+	%[1]s download playlist [flags] <playlist-id>
+	%[1]s download favorites [flags] <user-id>
+	%[1]s show track <track-id>
+	%[1]s show album <album-id>
+	%[1]s show playlist <playlist-id>
+	%[1]s help
 
 	Flags for download commands:
-	  -out: output directory
-	  -quality: choose audio quality
-	  -force: overwrite existing files
-	  `, name)
+		-out: output directory
+		-quality: choose audio quality
+		-force: overwrite existing files`, name)
 }
 
 func run(ctx context.Context, args []string) error {
@@ -1791,8 +1808,7 @@ Covers:
 Small: %s
 Medium: %s
 Big: %s
-XL: %s
-`,
+XL: %s`,
 		track.Title,
 		track.Artist.Name,
 		getArtists(track),
@@ -1860,8 +1876,7 @@ Covers:
 Small: %s
 Medium: %s
 Big: %s
-XL: %s
-`,
+XL: %s`,
 		album.Title,
 		album.Artist.Name,
 		formatDuration(album),
@@ -1883,7 +1898,7 @@ func formatPlaylistTracklist(playlist Playlist) string {
 
 	for _, track := range playlist.Tracks.Data {
 		artists := getArtists(track)
-		trackFormatted := fmt.Sprintf("%s - %s\n", artists, track.Title)
+		trackFormatted := fmt.Sprintf("%d\t%s - %s\n", track.ID, artists, track.Title)
 		tracklistBuilder.WriteString(trackFormatted)
 	}
 	return tracklistBuilder.String()
@@ -1897,8 +1912,7 @@ Creator: %s
 Duration: %s
 Creation date: %s
 Tracklist:
-%s
-`,
+%s`,
 		playlist.Title,
 		playlist.Creator.Name,
 		formatDuration(playlist),
@@ -1919,6 +1933,8 @@ func runShow(ctx context.Context, args []string) error {
 		return runShowAlbum(ctx, args[1:])
 	case "playlist":
 		return runShowPlaylist(ctx, args[1:])
+	case "user":
+		return runShowUser(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown show option %q", args[0])
 	}
@@ -1997,6 +2013,112 @@ func runShowPlaylist(ctx context.Context, args []string) error {
 	fmt.Println(formatPlaylistShowResult(playlist))
 	return nil
 }
+
+func formatUserShowResult(user User) string {
+	return fmt.Sprintf(
+`Name: %s
+ID: %d
+Country: %s
+Link: %s`, 
+	user.Name, 
+	user.ID,
+	user.Country,
+	user.Link)
+
+}
+type userSectionFunc func(context.Context, *Client, int) error
+
+var userSections = map[string]userSectionFunc{
+	"favorites": showUserFavorites,
+	"albums":    showUserAlbums,
+	"playlists": showUserPlaylists,
+}
+
+func runShowUser(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("show user", flag.ContinueOnError)
+	if len(args) == 0 {
+		return errors.New("show user: expected favorite, albums, or playlists")
+	}
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: dzscrape show user <user-id> [favorites|albums|playlists]")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	rest := fs.Args()
+	if len(rest) < 1 || len(rest) > 2 {
+		return errors.New("show user: expected <user-id> and an optional section")
+	}
+	uid, err := strconv.Atoi(rest[0])
+	if err != nil || uid <= 0 {
+		return fmt.Errorf("invalid user ID %q", rest[0])
+	}
+	section := ""
+	if len(rest) == 2 {
+		section = strings.ToLower(rest[1])
+	}
+
+	client := InitClient(os.Getenv("DEEZER_ARL"))
+
+	if section == "" {
+		user, err := client.GetUser(ctx, uid)
+		if err != nil {
+			return fmt.Errorf("get user %d: %w", uid, err)
+		}
+		fmt.Println(formatUserShowResult(user))
+
+		return nil
+	}
+
+	fn, ok := userSections[section]
+	if !ok {
+		fs.Usage()
+		return fmt.Errorf("unknown user section %q", section)
+	}
+	return fn(ctx, client,uid)
+}
+
+func showUserFavorites(ctx context.Context, client *Client, uid int) error {
+	tracks, err := client.GetUserTracks(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("get favorites for user %d: %w", uid, err)
+	}
+
+	for _, track := range tracks {
+		fmt.Printf("%s - %s\n", getArtists(track), track.Title)
+	}
+
+	return nil
+}
+
+func showUserAlbums(ctx context.Context, client *Client, uid int) error {
+	albums, err := client.GetUserAlbums(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("get albums for user %d: %w", uid, err)
+	}
+
+	for _, album := range albums {
+		fmt.Printf("%s - %s\n", album.Artist.Name, album.Title)
+	}
+
+	return nil
+}
+
+
+func showUserPlaylists(ctx context.Context, client *Client, uid int) error {
+	playlists, err := client.GetUserPlaylists(ctx, uid)
+	if err != nil {
+		return fmt.Errorf("get playlists for user %d: %w", uid, err)
+	}
+
+	for _, playlist := range playlists {
+		fmt.Printf("%d\t%s\n", playlist.ID, playlist.Title)
+	}
+	return nil
+}
+
 
 type fatalError struct {
 	err error
