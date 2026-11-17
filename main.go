@@ -841,6 +841,13 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 	} else {
 		releaseYear = fmt.Sprintf("%d", releaseDate.Year())
 	}
+	
+	var BPM string
+	if track.BPM == 0 {
+		BPM = "" 
+	} else {
+		BPM = strconv.FormatFloat(track.BPM, 'f', -1, 64)
+	}
 
 	tags := map[string][]string{
 		taglib.Artist:      artists,
@@ -849,7 +856,7 @@ func (d *Downloader) addMetadata(ctx context.Context, path string, track Track) 
 		taglib.AlbumArtist: {track.Album.Artist.Name},
 		taglib.TrackNumber: {fmt.Sprintf("%d", track.TrackPosition)},
 		taglib.ISRC:        {track.ISRC},
-		taglib.BPM:         {fmt.Sprintf("%.2f", track.BPM)},
+		taglib.BPM:         {BPM},
 		taglib.Genre:       {genre},
 		taglib.Label:       {album.Label},
 		"Year":             {releaseYear},
@@ -1351,6 +1358,10 @@ func addDownloadFlags(fs *flag.FlagSet, opts *downloadOptions) {
 	fs.StringVar(&opts.quality, "quality", "low", "audio quality: low, medium, high or lossless")
 }
 
+func addShowFlags(fs *flag.FlagSet, opts *showTracklistOpts) {
+	fs.BoolVar(&opts.withID, "with-id", false, "show tracklist with track IDs")
+}
+
 func runDownloadTrack(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("download track", flag.ContinueOnError)
 	var opts downloadOptions
@@ -1792,6 +1803,13 @@ func formatTrackShowResult(track Track, album Album) string {
 		genre = album.Genres.Data[0].Name
 	}
 
+	var BPM string
+	if track.BPM == 0 {
+		BPM = "N/A" 
+	} else {
+		BPM = strconv.FormatFloat(track.BPM, 'f', -1, 64)
+	}
+
 	return fmt.Sprintf(
 `Title: %s
 Artist: %s
@@ -1800,7 +1818,7 @@ Album: %s
 Duration: %s
 Release date: %s
 Genre: %s
-BPM: %f
+BPM: %s
 Rank: %d
 Explicit lyrics: %t
 Label: %s
@@ -1816,7 +1834,7 @@ XL: %s`,
 		formatDuration(track),
 		track.ReleaseDate,
 		genre,
-		track.BPM,
+		BPM,
 		track.Rank,
 		track.ExplicitLyrics,
 		album.Label,
@@ -1827,7 +1845,7 @@ XL: %s`,
 	)
 }
 
-func formatAlbumTracklist(tracks []Track) string {
+func formatAlbumTracklist(tracks []Track, withID bool) string {
 	multiDisc := hasMultipleDiscs(tracks)
 
 	var b strings.Builder
@@ -1849,18 +1867,23 @@ func formatAlbumTracklist(tracks []Track) string {
 		}
 
 		b.WriteString(explicitMarker(track))
+		if withID {
+			b.WriteString(" (")
+			b.WriteString(strconv.Itoa(track.ID))
+			b.WriteString(")")
+		}
 		b.WriteByte('\n')
 	}
 
 	return strings.TrimRight(b.String(), "\n")
 }
-func formatAlbumShowResult(album Album, tracks []Track) string {
+func formatAlbumShowResult(album Album, tracks []Track, withID bool) string {
 	genre := "N/A"
 	if len(album.Genres.Data) > 0 {
 		genre = album.Genres.Data[0].Name
 	}
 
-	tracklist := formatAlbumTracklist(tracks)
+	tracklist := formatAlbumTracklist(tracks, withID)
 	return fmt.Sprintf(
 `Title: %s
 Artist: %s
@@ -1891,6 +1914,10 @@ XL: %s`,
 		album.CoverBig,
 		album.CoverXL,
 	)
+}
+
+type showTracklistOpts struct {
+	withID	bool
 }
 
 func formatPlaylistTracklist(playlist Playlist) string {
@@ -1967,6 +1994,8 @@ func runShowTrack(ctx context.Context, args []string) error {
 
 func runShowAlbum(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("show album", flag.ContinueOnError)
+	var opts showTracklistOpts
+	addShowFlags(fs, &opts)
 	id, err := parseSingleID(fs, args, "album")
 	if err != nil {
 		return nil
@@ -1992,7 +2021,7 @@ func runShowAlbum(ctx context.Context, args []string) error {
 		tracks = append(tracks, page.Data...)
 		next = page.Next
 	}
-	fmt.Println(formatAlbumShowResult(album, tracks))
+	fmt.Println(formatAlbumShowResult(album, tracks, opts.withID))
 	return nil
 }
 
@@ -2039,10 +2068,12 @@ func runShowUser(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("show user: expected favorite, albums, or playlists")
 	}
+
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: dzscrape show user <user-id> [favorites|albums|playlists]")
 		fs.PrintDefaults()
 	}
+
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
